@@ -2,16 +2,20 @@
 
 An event-driven serverless application built with Go and AWS to explore asynchronous processing, messaging, resilience and observability.
 
-## Current scope: phase 4 — SNS publishing
+## Current scope: phase 5 — SNS to SQS delivery
 
 `POST /orders` validates the request, creates the versioned `OrderCreated`
-event, publishes it to the standard SNS topic `order-events`, and returns
-`202 Accepted` only after SNS accepts the publication. There are no subscribers
-yet; the first SQS subscription belongs to phase 5.
+event, and publishes it to the standard SNS topic `order-events`. The topic now
+delivers every event to the standard SQS queue `stock-queue`. No Lambda consumes
+the queue yet; stock processing belongs to phase 6.
 
 ```text
-Client -> HTTP API -> CreateOrder -> OrderCreated -> SNS order-events
+Client -> HTTP API -> CreateOrder -> SNS order-events -> stock-queue
 ```
+
+The SNS subscription uses raw message delivery. Therefore, the SQS message body
+is the `OrderCreated` JSON itself instead of an additional SNS envelope. This
+keeps the first consumer focused on the event contract.
 
 Request:
 
@@ -132,8 +136,18 @@ curl --request POST https://YOUR_API_ID.execute-api.REGION.amazonaws.com/orders 
 ```
 
 A `202 Accepted` response means the SNS `Publish` call completed successfully.
-The topic's CloudWatch `NumberOfMessagesPublished` metric can also be checked.
-There is intentionally no subscription to receive the message in this phase.
+Copy `StockQueueUrl` from the stack outputs and inspect the queue:
+
+```bash
+aws sqs receive-message \
+  --queue-url YOUR_STOCK_QUEUE_URL \
+  --max-number-of-messages 1 \
+  --wait-time-seconds 10
+```
+
+The response should contain one message whose `Body` is the `OrderCreated` JSON.
+Receiving does not process or permanently remove it because there is no consumer
+in this phase.
 
 ## Structure
 
@@ -153,7 +167,7 @@ There is intentionally no subscription to receive the message in this phase.
 ```
 
 `sam build` and the tests do not create AWS resources. An explicit `sam deploy`
-creates the Lambda, HTTP API, SNS topic and generated IAM execution role. The
-role grants `sns:Publish` only for the `order-events` topic declared by this
-stack. Because the topic has no subscriber in phase 4, published messages are
-not retained for later consumption.
+creates the Lambda, HTTP API, SNS topic, SQS queue, SNS subscription, queue
+resource policy, and generated Lambda execution role. The Lambda role grants
+`sns:Publish` only for `order-events`; the queue policy grants `sqs:SendMessage`
+only to the SNS service when the source is that exact topic.

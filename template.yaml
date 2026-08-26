@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless Orders - phase 4 SNS publishing
+Description: Serverless Orders - phase 5 SNS to SQS delivery
 
 Globals:
   Function:
@@ -12,6 +12,40 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: order-events
+
+  StockQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: stock-queue
+      FifoQueue: false
+
+  StockQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref StockQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowOrderEventsTopic
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt StockQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref OrderEventsTopic
+
+  StockQueueSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: StockQueuePolicy
+    Properties:
+      TopicArn: !Ref OrderEventsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt StockQueue.Arn
+      RawMessageDelivery: true
 
   OrdersHttpApi:
     Type: AWS::Serverless::HttpApi
@@ -52,6 +86,14 @@ Outputs:
   OrderEventsTopicArn:
     Description: ARN of the order events SNS topic
     Value: !Ref OrderEventsTopic
+
+  StockQueueUrl:
+    Description: URL of the stock SQS queue
+    Value: !Ref StockQueue
+
+  StockQueueArn:
+    Description: ARN of the stock SQS queue
+    Value: !GetAtt StockQueue.Arn
 
   OrdersApiUrl:
     Description: Base URL of the orders HTTP API
