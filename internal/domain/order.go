@@ -8,14 +8,14 @@ import (
 
 // OrderItem identifies a product and the amount requested by the customer.
 type OrderItem struct {
-	ProductID string `json:"productId"`
-	Quantity  int    `json:"quantity"`
+	ProductID string
+	Quantity  int
 }
 
 // CreateOrderInput contains the business data needed to accept an order.
 type CreateOrderInput struct {
-	CustomerID string      `json:"customerId"`
-	Items      []OrderItem `json:"items"`
+	CustomerID string
+	Items      []OrderItem
 }
 
 // Validate checks the minimum business rules introduced in phase 2.

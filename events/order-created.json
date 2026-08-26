@@ -1,0 +1,16 @@
+{
+  "eventId": "event-123",
+  "eventType": "OrderCreated",
+  "eventVersion": 1,
+  "occurredAt": "2026-08-26T15:30:00Z",
+  "data": {
+    "orderId": "order-123",
+    "customerId": "customer-123",
+    "items": [
+      {
+        "productId": "product-456",
+        "quantity": 2
+      }
+    ]
+  }
+}

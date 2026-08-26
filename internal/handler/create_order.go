@@ -24,6 +24,18 @@ type CreateOrderResponse struct {
 	Status  string `json:"status"`
 }
 
+// CreateOrderRequest is the HTTP contract accepted by POST /orders.
+type CreateOrderRequest struct {
+	CustomerID string                   `json:"customerId"`
+	Items      []CreateOrderItemRequest `json:"items"`
+}
+
+// CreateOrderItemRequest is the HTTP representation of an order item.
+type CreateOrderItemRequest struct {
+	ProductID string `json:"productId"`
+	Quantity  int    `json:"quantity"`
+}
+
 type errorResponse struct {
 	Message string `json:"message"`
 }
@@ -48,10 +60,11 @@ func (handler CreateOrderHandler) Handle(
 		return jsonResponse(http.StatusBadRequest, errorResponse{Message: err.Error()})
 	}
 
-	var input domain.CreateOrderInput
-	if err := decodeJSON(body, &input); err != nil {
+	var requestPayload CreateOrderRequest
+	if err := decodeJSON(body, &requestPayload); err != nil {
 		return jsonResponse(http.StatusBadRequest, errorResponse{Message: "request body must be valid JSON"})
 	}
+	input := requestPayload.toDomain()
 	if err := input.Validate(); err != nil {
 		return jsonResponse(http.StatusBadRequest, errorResponse{Message: err.Error()})
 	}
@@ -65,6 +78,21 @@ func (handler CreateOrderHandler) Handle(
 		OrderID: orderID,
 		Status:  "accepted",
 	})
+}
+
+func (request CreateOrderRequest) toDomain() domain.CreateOrderInput {
+	items := make([]domain.OrderItem, len(request.Items))
+	for index, item := range request.Items {
+		items[index] = domain.OrderItem{
+			ProductID: item.ProductID,
+			Quantity:  item.Quantity,
+		}
+	}
+
+	return domain.CreateOrderInput{
+		CustomerID: request.CustomerID,
+		Items:      items,
+	}
 }
 
 func requestBody(request events.APIGatewayV2HTTPRequest) ([]byte, error) {
