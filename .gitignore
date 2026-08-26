@@ -1,0 +1,17 @@
+# AWS SAM build artifacts
+.aws-sam/
+
+# Compiled binaries and test artifacts
+bootstrap
+bin/
+coverage.out
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Editor and operating system files
+.idea/
+.vscode/
+.DS_Store

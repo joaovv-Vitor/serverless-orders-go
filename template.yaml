@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless Orders - phase 1 bootstrap
+
+Globals:
+  Function:
+    MemorySize: 128
+    Timeout: 5
+
+Resources:
+  CreateOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - x86_64
+    Metadata:
+      BuildMethod: makefile
+
+Outputs:
+  CreateOrderFunctionName:
+    Description: Name of the bootstrap Lambda function
+    Value: !Ref CreateOrderFunction
