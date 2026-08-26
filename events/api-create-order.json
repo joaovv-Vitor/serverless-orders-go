@@ -1,0 +1,18 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /orders",
+  "rawPath": "/orders",
+  "rawQueryString": "",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "requestContext": {
+    "http": {
+      "method": "POST",
+      "path": "/orders",
+      "protocol": "HTTP/1.1"
+    }
+  },
+  "body": "{\"customerId\":\"customer-123\",\"items\":[{\"productId\":\"product-456\",\"quantity\":2}]}",
+  "isBase64Encoded": false
+}

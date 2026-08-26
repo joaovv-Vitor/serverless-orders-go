@@ -7,5 +7,6 @@ import (
 )
 
 func main() {
-	lambda.Start(handler.HandleBootstrap)
+	createOrderHandler := handler.NewCreateOrderHandler()
+	lambda.Start(createOrderHandler.Handle)
 }

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless Orders - phase 1 bootstrap
+Description: Serverless Orders - phase 2 HTTP API
 
 Globals:
   Function:
@@ -8,6 +8,11 @@ Globals:
     Timeout: 5
 
 Resources:
+  OrdersHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+
   CreateOrderFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -16,10 +21,22 @@ Resources:
       Runtime: provided.al2023
       Architectures:
         - x86_64
+      Events:
+        CreateOrder:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref OrdersHttpApi
+            Path: /orders
+            Method: POST
+            PayloadFormatVersion: "2.0"
     Metadata:
       BuildMethod: makefile
 
 Outputs:
+  OrdersApiUrl:
+    Description: Base URL of the orders HTTP API
+    Value: !Sub https://${OrdersHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+
   CreateOrderFunctionName:
-    Description: Name of the bootstrap Lambda function
+    Description: Name of the CreateOrder Lambda function
     Value: !Ref CreateOrderFunction

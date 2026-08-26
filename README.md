@@ -2,25 +2,32 @@
 
 An event-driven serverless application built with Go and AWS to explore asynchronous processing, messaging, resilience and observability.
 
-## Current scope: phase 1 — Bootstrap
+## Current scope: phase 2 — HTTP API
 
-This phase creates the smallest deployable foundation for the project: one Go
-Lambda, an AWS SAM template, a local event and automated checks. It deliberately
-does not include API Gateway, SNS, SQS or DynamoDB yet.
+This phase exposes the first application use case through an API Gateway HTTP
+API. `POST /orders` validates the request, generates an order ID and returns
+`202 Accepted`. It deliberately does not publish events or persist orders yet.
 
-The bootstrap function accepts:
+Request:
 
 ```json
 {
-  "name": "developer"
+  "customerId": "customer-123",
+  "items": [
+    {
+      "productId": "product-456",
+      "quantity": 2
+    }
+  ]
 }
 ```
 
-and returns:
+Response:
 
 ```json
 {
-  "message": "hello, developer"
+  "orderId": "generated-uuid",
+  "status": "accepted"
 }
 ```
 
@@ -28,7 +35,7 @@ and returns:
 
 - Go 1.24 or newer;
 - AWS SAM CLI;
-- Docker, only for `sam local invoke`;
+- Docker, for `sam local invoke` and `sam local start-api`;
 - AWS credentials are not required for local build and invocation.
 
 ## Commands
@@ -38,6 +45,7 @@ make test          # run Go tests
 make validate      # validate and lint the SAM template
 make build         # compile the Lambda through AWS SAM
 make local-invoke  # build and invoke the Lambda in a local container
+make local-api     # serve the HTTP API locally
 make clean         # remove SAM build artifacts
 ```
 
@@ -47,26 +55,41 @@ The equivalent commands requested by the project are:
 go test ./...
 sam validate --lint
 sam build
-sam local invoke CreateOrderFunction --event events/bootstrap.json
+sam local invoke CreateOrderFunction --event events/api-create-order.json
 ```
 
-The expected local invocation payload is:
+The expected local invocation has status code `202` and a body similar to:
 
 ```json
-{"message":"hello, developer"}
+{"orderId":"0f85d17e-5e7d-44d4-a14a-413e739dc24b","status":"accepted"}
+```
+
+To exercise the HTTP route locally, start the API:
+
+```bash
+make local-api
+```
+
+Then send a request from another terminal:
+
+```bash
+curl --request POST http://127.0.0.1:3000/orders \
+  --header 'content-type: application/json' \
+  --data '{"customerId":"customer-123","items":[{"productId":"product-456","quantity":2}]}'
 ```
 
 ## Structure
 
 ```text
 .
-├── cmd/create-order/main.go       # Lambda entry point
-├── events/bootstrap.json          # local invocation event
-├── internal/handler/              # testable bootstrap logic
+├── cmd/create-order/main.go          # Lambda entry point
+├── events/api-create-order.json      # API Gateway v2 local event
+├── internal/domain/order.go          # order data and validation
+├── internal/handler/create_order.go  # HTTP adapter
 ├── Makefile
 ├── go.mod
-└── template.yaml                  # AWS SAM infrastructure
+└── template.yaml                    # AWS SAM infrastructure
 ```
 
 No AWS resources are created by the commands above. Resources are created only
-after an explicit deployment with `sam deploy`, which is outside phase 1.
+after an explicit deployment with `sam deploy`, which is outside phase 2.

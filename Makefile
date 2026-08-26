@@ -1,4 +1,4 @@
-.PHONY: test validate build local-invoke clean build-CreateOrderFunction
+.PHONY: test validate build local-invoke local-api clean build-CreateOrderFunction
 
 # Called by SAM's makefile builder. A static binary avoids depending on the
 # developer machine's C library when the function runs on Amazon Linux 2023.
@@ -21,7 +21,10 @@ build:
 	sam build
 
 local-invoke: build
-	sam local invoke CreateOrderFunction --event events/bootstrap.json
+	sam local invoke CreateOrderFunction --event events/api-create-order.json
+
+local-api: build
+	sam local start-api
 
 clean:
 	rm -rf .aws-sam
