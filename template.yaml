@@ -1,6 +1,17 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless Orders - phase 7 SNS fan-out
+Description: Serverless Orders - phase 8 dead-letter queues
+
+Parameters:
+  StockFailureCustomerId:
+    Type: String
+    Default: ""
+    Description: Customer ID that forces stock processing to fail during development
+
+  NotificationFailureCustomerId:
+    Type: String
+    Default: ""
+    Description: Customer ID that forces notification sending to fail during development
 
 Globals:
   Function:
@@ -13,11 +24,21 @@ Resources:
     Properties:
       TopicName: order-events
 
+  StockDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: stock-dlq
+      FifoQueue: false
+      MessageRetentionPeriod: 1209600
+
   StockQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: stock-queue
       FifoQueue: false
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt StockDLQ.Arn
+        maxReceiveCount: 3
 
   StockQueuePolicy:
     Type: AWS::SQS::QueuePolicy
@@ -47,11 +68,21 @@ Resources:
       Endpoint: !GetAtt StockQueue.Arn
       RawMessageDelivery: true
 
+  NotificationDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: notification-dlq
+      FifoQueue: false
+      MessageRetentionPeriod: 1209600
+
   NotificationQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: notification-queue
       FifoQueue: false
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt NotificationDLQ.Arn
+        maxReceiveCount: 3
 
   NotificationQueuePolicy:
     Type: AWS::SQS::QueuePolicy
@@ -124,6 +155,9 @@ Resources:
       Runtime: provided.al2023
       Architectures:
         - x86_64
+      Environment:
+        Variables:
+          FORCE_FAILURE_CUSTOMER_ID: !Ref StockFailureCustomerId
       Policies:
         - Version: "2012-10-17"
           Statement:
@@ -151,6 +185,9 @@ Resources:
       Runtime: provided.al2023
       Architectures:
         - x86_64
+      Environment:
+        Variables:
+          FORCE_FAILURE_CUSTOMER_ID: !Ref NotificationFailureCustomerId
       Policies:
         - Version: "2012-10-17"
           Statement:
@@ -183,6 +220,14 @@ Outputs:
     Description: ARN of the stock SQS queue
     Value: !GetAtt StockQueue.Arn
 
+  StockDLQUrl:
+    Description: URL of the stock dead-letter queue
+    Value: !Ref StockDLQ
+
+  StockDLQArn:
+    Description: ARN of the stock dead-letter queue
+    Value: !GetAtt StockDLQ.Arn
+
   NotificationQueueUrl:
     Description: URL of the notification SQS queue
     Value: !Ref NotificationQueue
@@ -190,6 +235,14 @@ Outputs:
   NotificationQueueArn:
     Description: ARN of the notification SQS queue
     Value: !GetAtt NotificationQueue.Arn
+
+  NotificationDLQUrl:
+    Description: URL of the notification dead-letter queue
+    Value: !Ref NotificationDLQ
+
+  NotificationDLQArn:
+    Description: ARN of the notification dead-letter queue
+    Value: !GetAtt NotificationDLQ.Arn
 
   OrdersApiUrl:
     Description: Base URL of the orders HTTP API

@@ -15,7 +15,7 @@ func TestSenderSendWritesStructuredLog(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)))
+	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)), "")
 	if err != nil {
 		t.Fatalf("NewSender() error = %v", err)
 	}
@@ -43,9 +43,32 @@ func TestSenderSendWritesStructuredLog(t *testing.T) {
 func TestNewSenderRequiresLogger(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewSender(nil)
+	_, err := NewSender(nil, "")
 	if err == nil || err.Error() != "logger is required" {
 		t.Fatalf("NewSender() error = %v", err)
+	}
+}
+
+func TestSenderSendCanForceFailure(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)), "customer-123")
+	if err != nil {
+		t.Fatalf("NewSender() error = %v", err)
+	}
+
+	err = sender.Send(context.Background(), notificationEvent(t))
+	if err == nil || err.Error() != "forced notification failure" {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	var entry map[string]any
+	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
+		t.Fatalf("failure log is not valid JSON: %v", err)
+	}
+	if entry["level"] != "ERROR" || entry["msg"] != "forced notification failure" {
+		t.Fatalf("failure log = %#v", entry)
 	}
 }
 

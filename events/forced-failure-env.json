@@ -1,0 +1,8 @@
+{
+  "ProcessStockFunction": {
+    "FORCE_FAILURE_CUSTOMER_ID": "customer-fail"
+  },
+  "SendNotificationFunction": {
+    "FORCE_FAILURE_CUSTOMER_ID": "customer-fail"
+  }
+}

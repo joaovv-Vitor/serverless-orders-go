@@ -12,7 +12,7 @@ import (
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	sender, err := notification.NewSender(logger)
+	sender, err := notification.NewSender(logger, os.Getenv("FORCE_FAILURE_CUSTOMER_ID"))
 	if err != nil {
 		logger.Error("failed to configure notification sender", "error", err)
 		os.Exit(1)

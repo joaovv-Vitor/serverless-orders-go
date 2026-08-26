@@ -2,7 +2,7 @@
 
 An event-driven serverless application built with Go and AWS to explore asynchronous processing, messaging, resilience and observability.
 
-## Current scope: phase 7 — SNS fan-out MVP
+## Current scope: phase 8 — Dead-letter queues
 
 `POST /orders` validates the request, creates the versioned `OrderCreated`
 event, and publishes it once to the standard SNS topic `order-events`. SNS sends
@@ -13,6 +13,13 @@ its own Go Lambda. Both operations are simulated through structured logs.
                                   +-> stock-queue -> ProcessStock
 Client -> HTTP API -> CreateOrder -> SNS
                                   +-> notification-queue -> SendNotification
+```
+
+Each source queue now has a dead-letter queue:
+
+```text
+stock-queue        -- repeated failure --> stock-dlq
+notification-queue -- repeated failure --> notification-dlq
 ```
 
 The SNS subscription uses raw message delivery. Therefore, the SQS message body
@@ -28,6 +35,10 @@ response behavior is intentionally reserved for phase 10.
 the notification that would be sent to the customer. A failure in one queue does
 not block processing in the other queue. Both event sources currently use
 `BatchSize: 1`.
+
+Both source queues use `maxReceiveCount: 3`. A message that repeatedly fails is
+moved by SQS to its branch-specific DLQ. DLQ messages are retained for 14 days.
+There is no automatic DLQ consumer or redrive in this phase.
 
 Request:
 
@@ -92,7 +103,9 @@ make validate      # validate and lint the SAM template
 make build         # compile the Lambda through AWS SAM
 make local-invoke  # build and invoke the Lambda in a local container
 make local-invoke-stock # invoke ProcessStock with a local SQS event
+make local-invoke-stock-failure # force a local stock failure
 make local-invoke-notification # invoke SendNotification locally
+make local-invoke-notification-failure # force a local notification failure
 make local-api     # serve the HTTP API locally
 make clean         # remove SAM build artifacts
 ```
@@ -122,6 +135,17 @@ Expected output includes JSON log entries similar to:
 {"level":"INFO","msg":"stock processed","service":"process-stock","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated"}
 {"level":"INFO","msg":"notification sent","service":"send-notification","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated","customerId":"customer-123"}
 ```
+
+Controlled failures are disabled by default. To exercise them locally:
+
+```bash
+make local-invoke-stock-failure
+make local-invoke-notification-failure
+```
+
+These commands are expected to return an error after emitting either `forced
+stock failure` or `forced notification failure`. SAM local does not emulate SQS
+receive counts or move messages to a DLQ.
 
 After deploying the stack, `POST /orders` returns status code `202` with a body
 similar to:
@@ -155,6 +179,30 @@ For an end-to-end AWS check, deploy explicitly:
 sam deploy --guided
 ```
 
+For a controlled stock failure, set `StockFailureCustomerId` to
+`customer-fail` and leave `NotificationFailureCustomerId` empty. Reverse those
+values to test the notification DLQ. Then submit:
+
+```bash
+curl --request POST https://YOUR_API_ID.execute-api.REGION.amazonaws.com/orders \
+  --header 'content-type: application/json' \
+  --data '{"customerId":"customer-fail","items":[{"productId":"product-456","quantity":2}]}'
+```
+
+After the selected consumer fails repeatedly, copy `StockDLQUrl` or
+`NotificationDLQUrl` from the stack outputs and inspect it:
+
+```bash
+aws sqs receive-message \
+  --queue-url YOUR_DLQ_URL \
+  --max-number-of-messages 1 \
+  --wait-time-seconds 10 \
+  --attribute-names ApproximateReceiveCount
+```
+
+Reset both failure parameters to empty strings after testing. Detailed behavior
+and validation boundaries are recorded in `docs/failure-handling.md`.
+
 Use a stack name such as `serverless-orders`, confirm IAM role creation, and
 copy `OrdersApiUrl` from the stack outputs. Then call:
 
@@ -185,9 +233,11 @@ its visibility timeout while the other branch remains successfully processed.
 ├── cmd/create-order/main.go          # Lambda entry point
 ├── cmd/process-stock/main.go         # stock Lambda entry point
 ├── cmd/send-notification/main.go     # notification Lambda entry point
+├── docs/failure-handling.md          # retries and DLQ behavior
 ├── events/api-create-order.json      # API Gateway v2 local event
 ├── events/local-env.example.json     # local SNS configuration example
 ├── events/order-created.json         # OrderCreated v1 example
+├── events/sqs-order-created-failure.json # controlled failure event
 ├── events/sqs-order-created.json     # local SQS event
 ├── internal/domain/event.go          # versioned integration event
 ├── internal/domain/order.go          # order data and validation

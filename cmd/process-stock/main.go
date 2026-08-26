@@ -12,7 +12,7 @@ import (
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	processor, err := stock.NewProcessor(logger)
+	processor, err := stock.NewProcessor(logger, os.Getenv("FORCE_FAILURE_CUSTOMER_ID"))
 	if err != nil {
 		logger.Error("failed to configure stock processor", "error", err)
 		os.Exit(1)

@@ -1,0 +1,15 @@
+{
+  "Records": [
+    {
+      "messageId": "message-failure-123",
+      "receiptHandle": "local-receipt-handle",
+      "body": "{\"eventId\":\"event-failure-123\",\"eventType\":\"OrderCreated\",\"eventVersion\":1,\"occurredAt\":\"2026-08-26T15:30:00Z\",\"data\":{\"orderId\":\"order-failure-123\",\"customerId\":\"customer-fail\",\"items\":[{\"productId\":\"product-456\",\"quantity\":2}]}}",
+      "attributes": {},
+      "messageAttributes": {},
+      "md5OfBody": "",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:example-queue",
+      "awsRegion": "us-east-1"
+    }
+  ]
+}

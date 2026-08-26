@@ -16,7 +16,7 @@ func TestProcessorProcessWritesStructuredLogs(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)))
+	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)), "")
 	if err != nil {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
@@ -61,9 +61,32 @@ func TestProcessorProcessWritesStructuredLogs(t *testing.T) {
 func TestNewProcessorRequiresLogger(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewProcessor(nil)
+	_, err := NewProcessor(nil, "")
 	if err == nil || err.Error() != "logger is required" {
 		t.Fatalf("NewProcessor() error = %v", err)
+	}
+}
+
+func TestProcessorProcessCanForceFailure(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)), "customer-123")
+	if err != nil {
+		t.Fatalf("NewProcessor() error = %v", err)
+	}
+
+	err = processor.Process(context.Background(), stockEvent(t))
+	if err == nil || err.Error() != "forced stock failure" {
+		t.Fatalf("Process() error = %v", err)
+	}
+
+	var entry map[string]any
+	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
+		t.Fatalf("failure log is not valid JSON: %v", err)
+	}
+	if entry["level"] != "ERROR" || entry["msg"] != "forced stock failure" {
+		t.Fatalf("failure log = %#v", entry)
 	}
 }
 
