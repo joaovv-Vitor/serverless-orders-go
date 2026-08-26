@@ -1,8 +1,10 @@
 {
   "ProcessStockFunction": {
-    "FORCE_FAILURE_CUSTOMER_ID": "customer-fail"
+    "FORCE_FAILURE_CUSTOMER_ID": "customer-fail",
+    "IDEMPOTENCY_TABLE_NAME": "local-processed-events"
   },
   "SendNotificationFunction": {
-    "FORCE_FAILURE_CUSTOMER_ID": "customer-fail"
+    "FORCE_FAILURE_CUSTOMER_ID": "customer-fail",
+    "IDEMPOTENCY_TABLE_NAME": "local-processed-events"
   }
 }

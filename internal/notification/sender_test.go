@@ -1,6 +1,7 @@
 package notification
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,7 +16,7 @@ func TestSenderSendWritesStructuredLog(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)), "")
+	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)), "", newNotificationMemoryExecutor())
 	if err != nil {
 		t.Fatalf("NewSender() error = %v", err)
 	}
@@ -43,8 +44,12 @@ func TestSenderSendWritesStructuredLog(t *testing.T) {
 func TestNewSenderRequiresLogger(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewSender(nil, "")
+	_, err := NewSender(nil, "", newNotificationMemoryExecutor())
 	if err == nil || err.Error() != "logger is required" {
+		t.Fatalf("NewSender() error = %v", err)
+	}
+	_, err = NewSender(slog.Default(), "", nil)
+	if err == nil || err.Error() != "idempotency executor is required" {
 		t.Fatalf("NewSender() error = %v", err)
 	}
 }
@@ -53,7 +58,7 @@ func TestSenderSendCanForceFailure(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)), "customer-123")
+	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)), "customer-123", newNotificationMemoryExecutor())
 	if err != nil {
 		t.Fatalf("NewSender() error = %v", err)
 	}
@@ -70,6 +75,60 @@ func TestSenderSendCanForceFailure(t *testing.T) {
 	if entry["level"] != "ERROR" || entry["msg"] != "forced notification failure" {
 		t.Fatalf("failure log = %#v", entry)
 	}
+}
+
+func TestSenderSendIgnoresDuplicateEventID(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)), "", newNotificationMemoryExecutor())
+	if err != nil {
+		t.Fatalf("NewSender() error = %v", err)
+	}
+	event := notificationEvent(t)
+
+	if err := sender.Send(context.Background(), event); err != nil {
+		t.Fatalf("first Send() error = %v", err)
+	}
+	if err := sender.Send(context.Background(), event); err != nil {
+		t.Fatalf("second Send() error = %v", err)
+	}
+
+	var messages []string
+	scanner := bufio.NewScanner(&output)
+	for scanner.Scan() {
+		var entry map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			t.Fatalf("log line is not valid JSON: %v", err)
+		}
+		messages = append(messages, entry["msg"].(string))
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan logs: %v", err)
+	}
+	if len(messages) != 2 || messages[0] != "notification sent" || messages[1] != "duplicate event ignored" {
+		t.Fatalf("messages = %v", messages)
+	}
+}
+
+type notificationMemoryExecutor struct {
+	seen map[string]bool
+}
+
+func newNotificationMemoryExecutor() *notificationMemoryExecutor {
+	return &notificationMemoryExecutor{seen: make(map[string]bool)}
+}
+
+func (executor *notificationMemoryExecutor) Run(_ context.Context, eventID string, operation func() error) (bool, error) {
+	if executor.seen[eventID] {
+		return false, nil
+	}
+	executor.seen[eventID] = true
+	if err := operation(); err != nil {
+		delete(executor.seen, eventID)
+		return true, err
+	}
+	return true, nil
 }
 
 func notificationEvent(t *testing.T) domain.OrderCreatedEvent {

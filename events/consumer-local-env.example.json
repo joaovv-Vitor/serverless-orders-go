@@ -1,0 +1,8 @@
+{
+  "ProcessStockFunction": {
+    "IDEMPOTENCY_TABLE_NAME": "REPLACE_WITH_DEPLOYED_TABLE_NAME"
+  },
+  "SendNotificationFunction": {
+    "IDEMPOTENCY_TABLE_NAME": "REPLACE_WITH_DEPLOYED_TABLE_NAME"
+  }
+}

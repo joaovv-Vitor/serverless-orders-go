@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless Orders - phase 8 dead-letter queues
+Description: Serverless Orders - phase 9 idempotent consumers
 
 Parameters:
   StockFailureCustomerId:
@@ -19,6 +19,21 @@ Globals:
     Timeout: 5
 
 Resources:
+  ProcessedEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: consumer
+          AttributeType: S
+        - AttributeName: eventId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: consumer
+          KeyType: HASH
+        - AttributeName: eventId
+          KeyType: RANGE
+
   OrderEventsTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -158,6 +173,7 @@ Resources:
       Environment:
         Variables:
           FORCE_FAILURE_CUSTOMER_ID: !Ref StockFailureCustomerId
+          IDEMPOTENCY_TABLE_NAME: !Ref ProcessedEventsTable
       Policies:
         - Version: "2012-10-17"
           Statement:
@@ -168,6 +184,12 @@ Resources:
                 - sqs:DeleteMessage
                 - sqs:GetQueueAttributes
               Resource: !GetAtt StockQueue.Arn
+            - Sid: ManageStockIdempotency
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+              Resource: !GetAtt ProcessedEventsTable.Arn
       Events:
         StockQueueEvent:
           Type: SQS
@@ -188,6 +210,7 @@ Resources:
       Environment:
         Variables:
           FORCE_FAILURE_CUSTOMER_ID: !Ref NotificationFailureCustomerId
+          IDEMPOTENCY_TABLE_NAME: !Ref ProcessedEventsTable
       Policies:
         - Version: "2012-10-17"
           Statement:
@@ -198,6 +221,12 @@ Resources:
                 - sqs:DeleteMessage
                 - sqs:GetQueueAttributes
               Resource: !GetAtt NotificationQueue.Arn
+            - Sid: ManageNotificationIdempotency
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+              Resource: !GetAtt ProcessedEventsTable.Arn
       Events:
         NotificationQueueEvent:
           Type: SQS
@@ -208,6 +237,14 @@ Resources:
       BuildMethod: makefile
 
 Outputs:
+  ProcessedEventsTableName:
+    Description: Name of the DynamoDB table used for consumer idempotency
+    Value: !Ref ProcessedEventsTable
+
+  ProcessedEventsTableArn:
+    Description: ARN of the DynamoDB table used for consumer idempotency
+    Value: !GetAtt ProcessedEventsTable.Arn
+
   OrderEventsTopicArn:
     Description: ARN of the order events SNS topic
     Value: !Ref OrderEventsTopic

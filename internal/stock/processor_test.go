@@ -12,11 +12,31 @@ import (
 	"github.com/joaovv-Vitor/serverless-orders-go/internal/domain"
 )
 
+type memoryExecutor struct {
+	seen map[string]bool
+}
+
+func newMemoryExecutor() *memoryExecutor {
+	return &memoryExecutor{seen: make(map[string]bool)}
+}
+
+func (executor *memoryExecutor) Run(_ context.Context, eventID string, operation func() error) (bool, error) {
+	if executor.seen[eventID] {
+		return false, nil
+	}
+	executor.seen[eventID] = true
+	if err := operation(); err != nil {
+		delete(executor.seen, eventID)
+		return true, err
+	}
+	return true, nil
+}
+
 func TestProcessorProcessWritesStructuredLogs(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)), "")
+	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)), "", newMemoryExecutor())
 	if err != nil {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
@@ -61,8 +81,12 @@ func TestProcessorProcessWritesStructuredLogs(t *testing.T) {
 func TestNewProcessorRequiresLogger(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewProcessor(nil, "")
+	_, err := NewProcessor(nil, "", newMemoryExecutor())
 	if err == nil || err.Error() != "logger is required" {
+		t.Fatalf("NewProcessor() error = %v", err)
+	}
+	_, err = NewProcessor(slog.Default(), "", nil)
+	if err == nil || err.Error() != "idempotency executor is required" {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
 }
@@ -71,7 +95,7 @@ func TestProcessorProcessCanForceFailure(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)), "customer-123")
+	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)), "customer-123", newMemoryExecutor())
 	if err != nil {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
@@ -87,6 +111,51 @@ func TestProcessorProcessCanForceFailure(t *testing.T) {
 	}
 	if entry["level"] != "ERROR" || entry["msg"] != "forced stock failure" {
 		t.Fatalf("failure log = %#v", entry)
+	}
+}
+
+func TestProcessorProcessIgnoresDuplicateEventID(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)), "", newMemoryExecutor())
+	if err != nil {
+		t.Fatalf("NewProcessor() error = %v", err)
+	}
+	event := stockEvent(t)
+
+	if err := processor.Process(context.Background(), event); err != nil {
+		t.Fatalf("first Process() error = %v", err)
+	}
+	if err := processor.Process(context.Background(), event); err != nil {
+		t.Fatalf("second Process() error = %v", err)
+	}
+
+	var messages []string
+	scanner := bufio.NewScanner(&output)
+	for scanner.Scan() {
+		var entry map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			t.Fatalf("log line is not valid JSON: %v", err)
+		}
+		messages = append(messages, entry["msg"].(string))
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan logs: %v", err)
+	}
+
+	processingCount := 0
+	duplicateCount := 0
+	for _, message := range messages {
+		if message == "processing stock" {
+			processingCount++
+		}
+		if message == "duplicate event ignored" {
+			duplicateCount++
+		}
+	}
+	if processingCount != 2 || duplicateCount != 1 {
+		t.Fatalf("messages = %v, want two item logs and one duplicate log", messages)
 	}
 }
 
