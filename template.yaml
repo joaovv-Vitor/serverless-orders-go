@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless Orders - phase 3 event contract
+Description: Serverless Orders - phase 4 SNS publishing
 
 Globals:
   Function:
@@ -8,6 +8,11 @@ Globals:
     Timeout: 5
 
 Resources:
+  OrderEventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: order-events
+
   OrdersHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -21,6 +26,17 @@ Resources:
       Runtime: provided.al2023
       Architectures:
         - x86_64
+      Environment:
+        Variables:
+          ORDER_EVENTS_TOPIC_ARN: !Ref OrderEventsTopic
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: PublishOrderEvents
+              Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref OrderEventsTopic
       Events:
         CreateOrder:
           Type: HttpApi
@@ -33,6 +49,10 @@ Resources:
       BuildMethod: makefile
 
 Outputs:
+  OrderEventsTopicArn:
+    Description: ARN of the order events SNS topic
+    Value: !Ref OrderEventsTopic
+
   OrdersApiUrl:
     Description: Base URL of the orders HTTP API
     Value: !Sub https://${OrdersHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}

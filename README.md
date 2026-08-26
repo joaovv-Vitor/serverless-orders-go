@@ -2,12 +2,16 @@
 
 An event-driven serverless application built with Go and AWS to explore asynchronous processing, messaging, resilience and observability.
 
-## Current scope: phase 3 — Event contract
+## Current scope: phase 4 — SNS publishing
 
-`POST /orders` continues to validate the request, generate an order ID and
-return `202 Accepted`. This phase also defines the versioned `OrderCreated`
-integration contract. The event is modeled and tested but is not published yet;
-SNS belongs to phase 4.
+`POST /orders` validates the request, creates the versioned `OrderCreated`
+event, publishes it to the standard SNS topic `order-events`, and returns
+`202 Accepted` only after SNS accepts the publication. There are no subscribers
+yet; the first SQS subscription belongs to phase 5.
+
+```text
+Client -> HTTP API -> CreateOrder -> OrderCreated -> SNS order-events
+```
 
 Request:
 
@@ -61,8 +65,8 @@ HTTP-only field from accidentally becoming part of an event.
 
 - Go 1.24 or newer;
 - AWS SAM CLI;
-- Docker, for `sam local invoke` and `sam local start-api`;
-- AWS credentials are not required for local build and invocation.
+- Docker, for local Lambda/API execution;
+- AWS credentials for deployment or for publishing to a real topic locally.
 
 ## Commands
 
@@ -75,34 +79,61 @@ make local-api     # serve the HTTP API locally
 make clean         # remove SAM build artifacts
 ```
 
-The equivalent commands requested by the project are:
+The local checks that do not access AWS are:
 
 ```bash
 go test ./...
 sam validate --lint
 sam build
-sam local invoke CreateOrderFunction --event events/api-create-order.json
 ```
 
-The expected local invocation has status code `202` and a body similar to:
+Unit tests use a fake SNS client, so they verify the topic ARN and exact JSON
+message without requiring credentials or creating cloud resources.
+
+After deploying the stack, `POST /orders` returns status code `202` with a body
+similar to:
 
 ```json
 {"orderId":"0f85d17e-5e7d-44d4-a14a-413e739dc24b","status":"accepted"}
 ```
 
-To exercise the HTTP route locally, start the API:
+To invoke locally against an existing SNS topic, provide AWS credentials, copy
+`events/local-env.example.json` to the ignored `events/local-env.json`, and
+replace the placeholders with the real topic ARN:
+
+```json
+{
+  "CreateOrderFunction": {
+    "ORDER_EVENTS_TOPIC_ARN": "arn:aws:sns:REGION:ACCOUNT_ID:order-events"
+  }
+}
+```
+
+Then run either command:
 
 ```bash
+make local-invoke
 make local-api
 ```
 
-Then send a request from another terminal:
+For an end-to-end AWS check, deploy explicitly:
 
 ```bash
-curl --request POST http://127.0.0.1:3000/orders \
+sam deploy --guided
+```
+
+Use a stack name such as `serverless-orders`, confirm IAM role creation, and
+copy `OrdersApiUrl` from the stack outputs. Then call:
+
+```bash
+curl --request POST https://YOUR_API_ID.execute-api.REGION.amazonaws.com/orders \
   --header 'content-type: application/json' \
   --data '{"customerId":"customer-123","items":[{"productId":"product-456","quantity":2}]}'
 ```
+
+A `202 Accepted` response means the SNS `Publish` call completed successfully.
+The topic's CloudWatch `NumberOfMessagesPublished` metric can also be checked.
+There is intentionally no subscription to receive the message in this phase.
 
 ## Structure
 
@@ -110,14 +141,19 @@ curl --request POST http://127.0.0.1:3000/orders \
 .
 ├── cmd/create-order/main.go          # Lambda entry point
 ├── events/api-create-order.json      # API Gateway v2 local event
+├── events/local-env.example.json     # local SNS configuration example
 ├── events/order-created.json         # OrderCreated v1 example
 ├── internal/domain/event.go          # versioned integration event
 ├── internal/domain/order.go          # order data and validation
 ├── internal/handler/create_order.go  # HTTP adapter
+├── internal/messaging/sns_publisher.go # AWS SNS adapter
 ├── Makefile
 ├── go.mod
 └── template.yaml                    # AWS SAM infrastructure
 ```
 
-No AWS resources are created by the commands above. Resources are created only
-after an explicit deployment with `sam deploy`. Phase 3 adds no infrastructure.
+`sam build` and the tests do not create AWS resources. An explicit `sam deploy`
+creates the Lambda, HTTP API, SNS topic and generated IAM execution role. The
+role grants `sns:Publish` only for the `order-events` topic declared by this
+stack. Because the topic has no subscriber in phase 4, published messages are
+not retained for later consumption.

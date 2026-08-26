@@ -1,5 +1,7 @@
 .PHONY: test validate build local-invoke local-api clean build-CreateOrderFunction
 
+LOCAL_ENV_FILE ?= events/local-env.json
+
 # Called by SAM's makefile builder. A static binary avoids depending on the
 # developer machine's C library when the function runs on Amazon Linux 2023.
 build-CreateOrderFunction:
@@ -21,10 +23,12 @@ build:
 	sam build
 
 local-invoke: build
-	sam local invoke CreateOrderFunction --event events/api-create-order.json
+	sam local invoke CreateOrderFunction \
+		--event events/api-create-order.json \
+		--env-vars "$(LOCAL_ENV_FILE)"
 
 local-api: build
-	sam local start-api
+	sam local start-api --env-vars "$(LOCAL_ENV_FILE)"
 
 clean:
 	rm -rf .aws-sam

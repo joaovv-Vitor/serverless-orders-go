@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 
@@ -40,19 +41,32 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
+// EventPublisher is the event publishing capability required by CreateOrder.
+type EventPublisher interface {
+	Publish(context.Context, domain.OrderCreatedEvent) error
+}
+
 // CreateOrderHandler handles API Gateway requests for POST /orders.
 type CreateOrderHandler struct {
+	publisher  EventPublisher
 	newOrderID func() (string, error)
+	newEventID func() (string, error)
+	now        func() time.Time
 }
 
-// NewCreateOrderHandler creates a handler with a cryptographically random ID generator.
-func NewCreateOrderHandler() CreateOrderHandler {
-	return CreateOrderHandler{newOrderID: generateOrderID}
+// NewCreateOrderHandler creates a handler with production ID and clock dependencies.
+func NewCreateOrderHandler(publisher EventPublisher) CreateOrderHandler {
+	return CreateOrderHandler{
+		publisher:  publisher,
+		newOrderID: generateID,
+		newEventID: generateID,
+		now:        time.Now,
+	}
 }
 
-// Handle validates an order request and returns 202 Accepted.
+// Handle validates an order, publishes OrderCreated, and returns 202 Accepted.
 func (handler CreateOrderHandler) Handle(
-	_ context.Context,
+	ctx context.Context,
 	request events.APIGatewayV2HTTPRequest,
 ) (events.APIGatewayV2HTTPResponse, error) {
 	body, err := requestBody(request)
@@ -72,6 +86,17 @@ func (handler CreateOrderHandler) Handle(
 	orderID, err := handler.newOrderID()
 	if err != nil {
 		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("generate order id: %w", err)
+	}
+	eventID, err := handler.newEventID()
+	if err != nil {
+		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("generate event id: %w", err)
+	}
+	event, err := domain.NewOrderCreatedEvent(eventID, handler.now(), orderID, input)
+	if err != nil {
+		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("create OrderCreated event: %w", err)
+	}
+	if err := handler.publisher.Publish(ctx, event); err != nil {
+		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("publish OrderCreated event: %w", err)
 	}
 
 	return jsonResponse(http.StatusAccepted, CreateOrderResponse{
@@ -135,7 +160,7 @@ func jsonResponse(statusCode int, payload any) (events.APIGatewayV2HTTPResponse,
 	}, nil
 }
 
-func generateOrderID() (string, error) {
+func generateID() (string, error) {
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return "", err

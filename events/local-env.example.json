@@ -1,0 +1,5 @@
+{
+  "CreateOrderFunction": {
+    "ORDER_EVENTS_TOPIC_ARN": "arn:aws:sns:REGION:ACCOUNT_ID:order-events"
+  }
+}
