@@ -1,0 +1,15 @@
+{
+  "Records": [
+    {
+      "messageId": "message-123",
+      "receiptHandle": "local-receipt-handle",
+      "body": "{\"eventId\":\"event-123\",\"eventType\":\"OrderCreated\",\"eventVersion\":1,\"occurredAt\":\"2026-08-26T15:30:00Z\",\"data\":{\"orderId\":\"order-123\",\"customerId\":\"customer-123\",\"items\":[{\"productId\":\"product-456\",\"quantity\":2}]}}",
+      "attributes": {},
+      "messageAttributes": {},
+      "md5OfBody": "",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:stock-queue",
+      "awsRegion": "us-east-1"
+    }
+  ]
+}
