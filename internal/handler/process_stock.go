@@ -30,28 +30,28 @@ func NewProcessStockHandler(processor StockProcessor, logger *slog.Logger) Proce
 func (handler ProcessStockHandler) Handle(ctx context.Context, sqsEvent events.SQSEvent) (events.SQSEventResponse, error) {
 	failures := make([]events.SQSBatchItemFailure, 0)
 	for _, record := range sqsEvent.Records {
-		if err := handler.processRecord(ctx, record); err != nil {
-			handler.logger.ErrorContext(ctx, "SQS record failed",
-				"service", "process-stock",
-				"messageId", record.MessageId,
-				"error", err,
-			)
+		event, err := handler.processRecord(ctx, record)
+		attributes := sqsLogAttributes("process-stock", record.MessageId, event)
+		if err != nil {
+			handler.logger.ErrorContext(ctx, "SQS record failed", append(attributes, "error", err)...)
 			failures = append(failures, events.SQSBatchItemFailure{ItemIdentifier: record.MessageId})
+			continue
 		}
+		handler.logger.InfoContext(ctx, "SQS record completed", attributes...)
 	}
 	return events.SQSEventResponse{BatchItemFailures: failures}, nil
 }
 
-func (handler ProcessStockHandler) processRecord(ctx context.Context, record events.SQSMessage) error {
+func (handler ProcessStockHandler) processRecord(ctx context.Context, record events.SQSMessage) (domain.OrderCreatedEvent, error) {
 	var event domain.OrderCreatedEvent
 	if err := decodeJSON([]byte(record.Body), &event); err != nil {
-		return fmt.Errorf("decode OrderCreated event: %w", err)
+		return event, fmt.Errorf("decode OrderCreated event: %w", err)
 	}
 	if err := event.Validate(); err != nil {
-		return fmt.Errorf("validate OrderCreated event: %w", err)
+		return event, fmt.Errorf("validate OrderCreated event: %w", err)
 	}
 	if err := handler.processor.Process(ctx, event); err != nil {
-		return fmt.Errorf("process stock: %w", err)
+		return event, fmt.Errorf("process stock: %w", err)
 	}
-	return nil
+	return event, nil
 }

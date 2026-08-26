@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/joaovv-Vitor/serverless-orders-go/internal/domain"
+	"github.com/joaovv-Vitor/serverless-orders-go/internal/observability"
 )
 
 func TestSenderSendWritesStructuredLog(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)), "", newNotificationMemoryExecutor())
+	sender, err := NewSender(observability.NewJSONLogger(&output), "", newNotificationMemoryExecutor())
 	if err != nil {
 		t.Fatalf("NewSender() error = %v", err)
 	}
@@ -30,7 +31,7 @@ func TestSenderSendWritesStructuredLog(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
 		t.Fatalf("log is not valid JSON: %v", err)
 	}
-	if entry["msg"] != "notification sent" || entry["service"] != serviceName {
+	if entry["message"] != "notification sent" || entry["service"] != serviceName {
 		t.Fatalf("notification log = %#v", entry)
 	}
 	if entry["eventId"] != event.EventID || entry["orderId"] != event.Data.OrderID {
@@ -58,7 +59,7 @@ func TestSenderSendCanForceFailure(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)), "customer-123", newNotificationMemoryExecutor())
+	sender, err := NewSender(observability.NewJSONLogger(&output), "customer-123", newNotificationMemoryExecutor())
 	if err != nil {
 		t.Fatalf("NewSender() error = %v", err)
 	}
@@ -72,7 +73,7 @@ func TestSenderSendCanForceFailure(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
 		t.Fatalf("failure log is not valid JSON: %v", err)
 	}
-	if entry["level"] != "ERROR" || entry["msg"] != "forced notification failure" {
+	if entry["level"] != "ERROR" || entry["message"] != "forced notification failure" {
 		t.Fatalf("failure log = %#v", entry)
 	}
 }
@@ -81,7 +82,7 @@ func TestSenderSendIgnoresDuplicateEventID(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	sender, err := NewSender(slog.New(slog.NewJSONHandler(&output, nil)), "", newNotificationMemoryExecutor())
+	sender, err := NewSender(observability.NewJSONLogger(&output), "", newNotificationMemoryExecutor())
 	if err != nil {
 		t.Fatalf("NewSender() error = %v", err)
 	}
@@ -101,7 +102,7 @@ func TestSenderSendIgnoresDuplicateEventID(t *testing.T) {
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 			t.Fatalf("log line is not valid JSON: %v", err)
 		}
-		messages = append(messages, entry["msg"].(string))
+		messages = append(messages, entry["message"].(string))
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("scan logs: %v", err)

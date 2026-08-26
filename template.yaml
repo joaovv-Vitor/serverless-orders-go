@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless Orders - phase 10 partial SQS batch responses
+Description: Serverless Orders - phase 11 observability
 
 Parameters:
   StockFailureCustomerId:
@@ -240,7 +240,150 @@ Resources:
     Metadata:
       BuildMethod: makefile
 
+  CreateOrderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${CreateOrderFunction}
+      RetentionInDays: 14
+
+  ProcessStockLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ProcessStockFunction}
+      RetentionInDays: 14
+
+  SendNotificationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${SendNotificationFunction}
+      RetentionInDays: 14
+
+  ObservabilityDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${AWS::StackName}-orders
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Lambda invocations",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${CreateOrderFunction}"],
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${ProcessStockFunction}"],
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${SendNotificationFunction}"]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Lambda errors",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "period": 60,
+                "stat": "Sum",
+                "metrics": [
+                  ["AWS/Lambda", "Errors", "FunctionName", "${CreateOrderFunction}"],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${ProcessStockFunction}"],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${SendNotificationFunction}"]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "title": "Lambda duration",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "period": 60,
+                "stat": "Average",
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${CreateOrderFunction}"],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ProcessStockFunction}"],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${SendNotificationFunction}"]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "SQS available messages",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "period": 60,
+                "stat": "Average",
+                "metrics": [
+                  ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${StockQueue.QueueName}"],
+                  ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${NotificationQueue.QueueName}"]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "SQS messages in flight",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "period": 60,
+                "stat": "Average",
+                "metrics": [
+                  ["AWS/SQS", "ApproximateNumberOfMessagesNotVisible", "QueueName", "${StockQueue.QueueName}"],
+                  ["AWS/SQS", "ApproximateNumberOfMessagesNotVisible", "QueueName", "${NotificationQueue.QueueName}"]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "DLQ available messages",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "period": 60,
+                "stat": "Average",
+                "metrics": [
+                  ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${StockDLQ.QueueName}"],
+                  ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${NotificationDLQ.QueueName}"]
+                ]
+              }
+            }
+          ]
+        }
+
 Outputs:
+  ObservabilityDashboardName:
+    Description: Name of the CloudWatch observability dashboard
+    Value: !Ref ObservabilityDashboard
+
   ProcessedEventsTableName:
     Description: Name of the DynamoDB table used for consumer idempotency
     Value: !Ref ProcessedEventsTable

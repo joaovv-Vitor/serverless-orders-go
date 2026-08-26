@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/joaovv-Vitor/serverless-orders-go/internal/domain"
+	"github.com/joaovv-Vitor/serverless-orders-go/internal/observability"
 )
 
 type memoryExecutor struct {
@@ -36,7 +37,7 @@ func TestProcessorProcessWritesStructuredLogs(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)), "", newMemoryExecutor())
+	processor, err := NewProcessor(observability.NewJSONLogger(&output), "", newMemoryExecutor())
 	if err != nil {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
@@ -73,7 +74,7 @@ func TestProcessorProcessWritesStructuredLogs(t *testing.T) {
 	if entries[1]["productId"] != "product-789" || entries[1]["quantity"] != float64(1) {
 		t.Fatalf("second item log = %#v", entries[1])
 	}
-	if entries[2]["msg"] != "stock processed" {
+	if entries[2]["message"] != "stock processed" {
 		t.Fatalf("completion log = %#v", entries[2])
 	}
 }
@@ -95,7 +96,7 @@ func TestProcessorProcessCanForceFailure(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)), "customer-123", newMemoryExecutor())
+	processor, err := NewProcessor(observability.NewJSONLogger(&output), "customer-123", newMemoryExecutor())
 	if err != nil {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
@@ -109,7 +110,7 @@ func TestProcessorProcessCanForceFailure(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
 		t.Fatalf("failure log is not valid JSON: %v", err)
 	}
-	if entry["level"] != "ERROR" || entry["msg"] != "forced stock failure" {
+	if entry["level"] != "ERROR" || entry["message"] != "forced stock failure" {
 		t.Fatalf("failure log = %#v", entry)
 	}
 }
@@ -118,7 +119,7 @@ func TestProcessorProcessIgnoresDuplicateEventID(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	processor, err := NewProcessor(slog.New(slog.NewJSONHandler(&output, nil)), "", newMemoryExecutor())
+	processor, err := NewProcessor(observability.NewJSONLogger(&output), "", newMemoryExecutor())
 	if err != nil {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
@@ -138,7 +139,7 @@ func TestProcessorProcessIgnoresDuplicateEventID(t *testing.T) {
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 			t.Fatalf("log line is not valid JSON: %v", err)
 		}
-		messages = append(messages, entry["msg"].(string))
+		messages = append(messages, entry["message"].(string))
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("scan logs: %v", err)

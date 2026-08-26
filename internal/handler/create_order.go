@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -17,7 +18,10 @@ import (
 	"github.com/joaovv-Vitor/serverless-orders-go/internal/domain"
 )
 
-const contentTypeJSON = "application/json"
+const (
+	contentTypeJSON    = "application/json"
+	createOrderService = "create-order"
+)
 
 // CreateOrderResponse is the HTTP response returned when an order is accepted.
 type CreateOrderResponse struct {
@@ -52,15 +56,17 @@ type CreateOrderHandler struct {
 	newOrderID func() (string, error)
 	newEventID func() (string, error)
 	now        func() time.Time
+	logger     *slog.Logger
 }
 
 // NewCreateOrderHandler creates a handler with production ID and clock dependencies.
-func NewCreateOrderHandler(publisher EventPublisher) CreateOrderHandler {
+func NewCreateOrderHandler(publisher EventPublisher, logger *slog.Logger) CreateOrderHandler {
 	return CreateOrderHandler{
 		publisher:  publisher,
 		newOrderID: generateID,
 		newEventID: generateID,
 		now:        time.Now,
+		logger:     logger,
 	}
 }
 
@@ -85,19 +91,48 @@ func (handler CreateOrderHandler) Handle(
 
 	orderID, err := handler.newOrderID()
 	if err != nil {
+		handler.logger.ErrorContext(ctx, "order creation failed",
+			"service", createOrderService,
+			"error", err,
+		)
 		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("generate order id: %w", err)
 	}
 	eventID, err := handler.newEventID()
 	if err != nil {
+		handler.logger.ErrorContext(ctx, "order creation failed",
+			"service", createOrderService,
+			"orderId", orderID,
+			"error", err,
+		)
 		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("generate event id: %w", err)
 	}
 	event, err := domain.NewOrderCreatedEvent(eventID, handler.now(), orderID, input)
 	if err != nil {
+		handler.logger.ErrorContext(ctx, "order event creation failed",
+			"service", createOrderService,
+			"eventId", eventID,
+			"orderId", orderID,
+			"eventType", domain.OrderCreatedEventType,
+			"error", err,
+		)
 		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("create OrderCreated event: %w", err)
 	}
 	if err := handler.publisher.Publish(ctx, event); err != nil {
+		handler.logger.ErrorContext(ctx, "order event publication failed",
+			"service", createOrderService,
+			"eventId", event.EventID,
+			"orderId", event.Data.OrderID,
+			"eventType", event.EventType,
+			"error", err,
+		)
 		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("publish OrderCreated event: %w", err)
 	}
+	handler.logger.InfoContext(ctx, "order accepted",
+		"service", createOrderService,
+		"eventId", event.EventID,
+		"orderId", event.Data.OrderID,
+		"eventType", event.EventType,
+	)
 
 	return jsonResponse(http.StatusAccepted, CreateOrderResponse{
 		OrderID: orderID,

@@ -2,7 +2,7 @@
 
 An event-driven serverless application built with Go and AWS to explore asynchronous processing, messaging, resilience and observability.
 
-## Current scope: phase 10 — Partial SQS batch responses
+## Current scope: phase 11 — Observability
 
 `POST /orders` validates the request, creates the versioned `OrderCreated`
 event, and publishes it once to the standard SNS topic `order-events`. SNS sends
@@ -50,6 +50,12 @@ Both handlers now attempt every record in an SQS batch and return
 `batchItemFailures` containing only the failed message IDs. The event source
 mappings enable `ReportBatchItemFailures`, so successful records are removed
 while failed records remain eligible for retry. See `docs/batch-processing.md`.
+
+All application logs use a shared JSON contract with `level`, `service`,
+`message` and correlation identifiers when available. SAM also creates 14-day
+Lambda log groups and a CloudWatch dashboard for Lambda execution, source queue,
+in-flight message, and DLQ metrics. Queries and metric interpretation are in
+`docs/observability.md`.
 
 Request:
 
@@ -148,15 +154,15 @@ make local-invoke-notification
 Expected output includes JSON log entries similar to:
 
 ```json
-{"level":"INFO","msg":"processing stock","service":"process-stock","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated","productId":"product-456","quantity":2}
-{"level":"INFO","msg":"stock processed","service":"process-stock","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated"}
-{"level":"INFO","msg":"notification sent","service":"send-notification","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated","customerId":"customer-123"}
+{"level":"INFO","message":"processing stock","service":"process-stock","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated","productId":"product-456","quantity":2}
+{"level":"INFO","message":"stock processed","service":"process-stock","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated"}
+{"level":"INFO","message":"notification sent","service":"send-notification","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated","customerId":"customer-123"}
 ```
 
 Reusing the same `eventId` for a consumer produces:
 
 ```json
-{"level":"INFO","msg":"duplicate event ignored","service":"process-stock","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated"}
+{"level":"INFO","message":"duplicate event ignored","service":"process-stock","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated"}
 ```
 
 For the deterministic batch example, copy
@@ -295,6 +301,10 @@ ProcessStock:      processing stock -> stock processed
 SendNotification: notification sent
 ```
 
+Open the dashboard named by the `ObservabilityDashboardName` stack output to
+compare these executions with queue and DLQ metrics. Use the Logs Insights
+queries in `docs/observability.md` to follow the returned `orderId` end to end.
+
 After successful processing, each Lambda deletes only the message from its own
 queue. If one branch fails, that branch's message becomes visible again after
 its visibility timeout while the other branch remains successfully processed.
@@ -309,6 +319,7 @@ its visibility timeout while the other branch remains successfully processed.
 ├── docs/batch-processing.md          # partial batch response behavior
 ├── docs/failure-handling.md          # retries and DLQ behavior
 ├── docs/idempotency.md               # duplicate-delivery strategy
+├── docs/observability.md              # dashboard, metrics and log queries
 ├── events/api-create-order.json      # API Gateway v2 local event
 ├── events/consumer-batch-local-env.example.json # batch test configuration
 ├── events/consumer-local-env.example.json # local DynamoDB configuration
@@ -327,6 +338,7 @@ its visibility timeout while the other branch remains successfully processed.
 ├── internal/idempotency/repository.go # DynamoDB conditional-write adapter
 ├── internal/messaging/sns_publisher.go # AWS SNS adapter
 ├── internal/notification/sender.go   # simulated notification logic
+├── internal/observability/logger.go  # shared structured JSON logger
 ├── internal/stock/processor.go       # simulated stock logic
 ├── Makefile
 ├── go.mod
@@ -336,6 +348,7 @@ its visibility timeout while the other branch remains successfully processed.
 `sam build` and the tests do not create AWS resources. An explicit `sam deploy`
 creates the HTTP API, SNS topic, SQS queues, SNS subscriptions, queue
 resource policies, three Lambda functions, two SQS event source mappings, one
-on-demand DynamoDB table, and their generated execution roles. Each consumer
-can poll only its own queue and can write/delete only idempotency items in that
-table; neither consumer can publish to SNS.
+on-demand DynamoDB table, three CloudWatch log groups, one CloudWatch dashboard,
+and their generated execution roles. Each consumer can poll only its own queue
+and can write/delete only idempotency items in that table; neither consumer can
+publish to SNS.

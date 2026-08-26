@@ -30,28 +30,28 @@ func NewSendNotificationHandler(sender NotificationSender, logger *slog.Logger) 
 func (handler SendNotificationHandler) Handle(ctx context.Context, sqsEvent events.SQSEvent) (events.SQSEventResponse, error) {
 	failures := make([]events.SQSBatchItemFailure, 0)
 	for _, record := range sqsEvent.Records {
-		if err := handler.processRecord(ctx, record); err != nil {
-			handler.logger.ErrorContext(ctx, "SQS record failed",
-				"service", "send-notification",
-				"messageId", record.MessageId,
-				"error", err,
-			)
+		event, err := handler.processRecord(ctx, record)
+		attributes := sqsLogAttributes("send-notification", record.MessageId, event)
+		if err != nil {
+			handler.logger.ErrorContext(ctx, "SQS record failed", append(attributes, "error", err)...)
 			failures = append(failures, events.SQSBatchItemFailure{ItemIdentifier: record.MessageId})
+			continue
 		}
+		handler.logger.InfoContext(ctx, "SQS record completed", attributes...)
 	}
 	return events.SQSEventResponse{BatchItemFailures: failures}, nil
 }
 
-func (handler SendNotificationHandler) processRecord(ctx context.Context, record events.SQSMessage) error {
+func (handler SendNotificationHandler) processRecord(ctx context.Context, record events.SQSMessage) (domain.OrderCreatedEvent, error) {
 	var event domain.OrderCreatedEvent
 	if err := decodeJSON([]byte(record.Body), &event); err != nil {
-		return fmt.Errorf("decode OrderCreated event: %w", err)
+		return event, fmt.Errorf("decode OrderCreated event: %w", err)
 	}
 	if err := event.Validate(); err != nil {
-		return fmt.Errorf("validate OrderCreated event: %w", err)
+		return event, fmt.Errorf("validate OrderCreated event: %w", err)
 	}
 	if err := handler.sender.Send(ctx, event); err != nil {
-		return fmt.Errorf("send notification: %w", err)
+		return event, fmt.Errorf("send notification: %w", err)
 	}
-	return nil
+	return event, nil
 }

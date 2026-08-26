@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 
 	"github.com/joaovv-Vitor/serverless-orders-go/internal/domain"
+	"github.com/joaovv-Vitor/serverless-orders-go/internal/observability"
 )
 
 type eventPublisherFunc func(context.Context, domain.OrderCreatedEvent) error
@@ -106,6 +108,7 @@ func TestCreateOrderHandlerHandle(t *testing.T) {
 				now: func() time.Time {
 					return time.Date(2026, time.August, 26, 15, 30, 0, 0, time.UTC)
 				},
+				logger: discardLogger(),
 			}
 
 			response, err := handler.Handle(context.Background(), tt.request)
@@ -159,6 +162,7 @@ func TestCreateOrderHandlerHandleReturnsIDGenerationError(t *testing.T) {
 		newOrderID: func() (string, error) { return "", errors.New("random source unavailable") },
 		newEventID: func() (string, error) { return "event-test-id", nil },
 		now:        time.Now,
+		logger:     discardLogger(),
 	}
 	request := events.APIGatewayV2HTTPRequest{Body: `{
 		"customerId":"customer-123",
@@ -179,6 +183,7 @@ func TestCreateOrderHandlerHandleReturnsEventIDGenerationError(t *testing.T) {
 		newOrderID: func() (string, error) { return "order-test-id", nil },
 		newEventID: func() (string, error) { return "", errors.New("random source unavailable") },
 		now:        time.Now,
+		logger:     discardLogger(),
 	}
 	request := validCreateOrderAPIRequest()
 
@@ -198,11 +203,40 @@ func TestCreateOrderHandlerHandleReturnsPublishError(t *testing.T) {
 		newOrderID: func() (string, error) { return "order-test-id", nil },
 		newEventID: func() (string, error) { return "event-test-id", nil },
 		now:        time.Now,
+		logger:     discardLogger(),
 	}
 
 	_, err := handler.Handle(context.Background(), validCreateOrderAPIRequest())
 	if err == nil || err.Error() != "publish OrderCreated event: SNS unavailable" {
 		t.Fatalf("Handle() error = %v", err)
+	}
+}
+
+func TestCreateOrderHandlerLogsCorrelationFields(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	handler := CreateOrderHandler{
+		publisher:  eventPublisherFunc(func(context.Context, domain.OrderCreatedEvent) error { return nil }),
+		newOrderID: func() (string, error) { return "order-test-id", nil },
+		newEventID: func() (string, error) { return "event-test-id", nil },
+		now:        time.Now,
+		logger:     observability.NewJSONLogger(&output),
+	}
+
+	if _, err := handler.Handle(context.Background(), validCreateOrderAPIRequest()); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+
+	var entry map[string]any
+	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
+		t.Fatalf("log is not valid JSON: %v", err)
+	}
+	if entry["message"] != "order accepted" || entry["service"] != createOrderService {
+		t.Fatalf("log identity fields = %#v", entry)
+	}
+	if entry["eventId"] != "event-test-id" || entry["orderId"] != "order-test-id" || entry["eventType"] != domain.OrderCreatedEventType {
+		t.Fatalf("log correlation fields = %#v", entry)
 	}
 }
 

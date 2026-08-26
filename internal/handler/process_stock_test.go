@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 
 	"github.com/joaovv-Vitor/serverless-orders-go/internal/domain"
+	"github.com/joaovv-Vitor/serverless-orders-go/internal/observability"
 )
 
 type fakeStockProcessor struct {
@@ -121,6 +123,33 @@ func TestProcessStockHandlerReportsOnlyFailedBatchItem(t *testing.T) {
 	}
 }
 
+func TestProcessStockHandlerLogsRecordCorrelation(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	processor := &fakeStockProcessor{}
+	handler := NewProcessStockHandler(processor, observability.NewJSONLogger(&output))
+	event := validHandlerOrderCreatedEvent(t)
+
+	_, err := handler.Handle(context.Background(), events.SQSEvent{Records: []events.SQSMessage{
+		{MessageId: "message-123", Body: marshalHandlerEvent(t, event)},
+	}})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+
+	var entry map[string]any
+	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
+		t.Fatalf("log is not valid JSON: %v", err)
+	}
+	if entry["message"] != "SQS record completed" || entry["service"] != "process-stock" {
+		t.Fatalf("log identity fields = %#v", entry)
+	}
+	if entry["messageId"] != "message-123" || entry["eventId"] != event.EventID || entry["orderId"] != event.Data.OrderID || entry["eventType"] != event.EventType {
+		t.Fatalf("log correlation fields = %#v", entry)
+	}
+}
+
 func validHandlerOrderCreatedEvent(t *testing.T) domain.OrderCreatedEvent {
 	t.Helper()
 
@@ -150,7 +179,7 @@ func marshalHandlerEvent(t *testing.T, event domain.OrderCreatedEvent) string {
 }
 
 func discardLogger() *slog.Logger {
-	return slog.New(slog.NewJSONHandler(io.Discard, nil))
+	return observability.NewJSONLogger(io.Discard)
 }
 
 func assertOnlyBatchFailure(t *testing.T, response events.SQSEventResponse, messageID string) {
