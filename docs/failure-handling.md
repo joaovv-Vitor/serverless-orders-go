@@ -2,9 +2,10 @@
 
 ## Current behavior
 
-Both SQS consumers return an error when JSON decoding, event validation, or
-simulated processing fails. Lambda therefore does not acknowledge the failed
-message, and SQS makes it visible again after the visibility timeout.
+Both SQS consumers add the failed message ID to `batchItemFailures` when JSON
+decoding, event validation, or simulated processing fails. Lambda acknowledges
+the successful records and leaves only each reported message unacknowledged.
+SQS makes that message visible again after the visibility timeout.
 
 The source queues use `maxReceiveCount: 3`. After repeated failed receives, SQS
 moves the message to the queue-specific dead-letter queue:
@@ -32,9 +33,9 @@ continues independently.
 ## Locally observed
 
 The normal and forced-failure paths were invoked with SAM local. The normal
-events completed and emitted their success logs. The controlled events emitted
-`forced stock failure` and `forced notification failure`, and the Lambda
-invocations returned errors as expected.
+events completed and emitted their success logs. The controlled events emit
+`forced stock failure` or `forced notification failure`, and the handler returns
+their message IDs in `batchItemFailures`.
 
 SAM local invokes a function once. It does not poll SQS, update a receive count,
 wait for a visibility timeout, or move a message to a DLQ. Those behaviors must

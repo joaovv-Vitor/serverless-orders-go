@@ -2,7 +2,7 @@
 
 An event-driven serverless application built with Go and AWS to explore asynchronous processing, messaging, resilience and observability.
 
-## Current scope: phase 9 — Idempotent consumers
+## Current scope: phase 10 — Partial SQS batch responses
 
 `POST /orders` validates the request, creates the versioned `OrderCreated`
 event, and publishes it once to the standard SNS topic `order-events`. SNS sends
@@ -27,14 +27,13 @@ is the `OrderCreated` JSON itself instead of an additional SNS envelope. This
 keeps the first consumer focused on the event contract.
 
 `ProcessStock` decodes and validates `OrderCreated`, then writes one JSON log per
-item and a completion log. Any error is returned to Lambda so that SQS does not
-delete the message. The event source uses `BatchSize: 1`; batch and partial batch
-response behavior is intentionally reserved for phase 10.
+item and a completion log. Record errors are collected in the partial batch
+response so that SQS does not delete the failed messages. Its event source can
+deliver up to 10 records per invocation.
 
 `SendNotification` independently decodes and validates the same event, then logs
 the notification that would be sent to the customer. A failure in one queue does
-not block processing in the other queue. Both event sources currently use
-`BatchSize: 1`.
+not block processing in the other queue.
 
 Both source queues use `maxReceiveCount: 3`. A message that repeatedly fails is
 moved by SQS to its branch-specific DLQ. DLQ messages are retained for 14 days.
@@ -46,6 +45,11 @@ without repeating the operation and emits `duplicate event ignored`. Including
 the consumer in the primary key preserves fan-out: stock and notification each
 process the same event once. See `docs/idempotency.md` for the data model and its
 explicit failure limitation.
+
+Both handlers now attempt every record in an SQS batch and return
+`batchItemFailures` containing only the failed message IDs. The event source
+mappings enable `ReportBatchItemFailures`, so successful records are removed
+while failed records remain eligible for retry. See `docs/batch-processing.md`.
 
 Request:
 
@@ -110,8 +114,10 @@ make validate      # validate and lint the SAM template
 make build         # compile the Lambda through AWS SAM
 make local-invoke  # build and invoke the Lambda in a local container
 make local-invoke-stock # invoke ProcessStock with a local SQS event
+make local-invoke-stock-batch # invoke ProcessStock with A/B/C/D
 make local-invoke-stock-failure # force a local stock failure
 make local-invoke-notification # invoke SendNotification locally
+make local-invoke-notification-batch # invoke SendNotification with A/B/C/D
 make local-invoke-notification-failure # force a local notification failure
 make local-api     # serve the HTTP API locally
 make clean         # remove SAM build artifacts
@@ -153,6 +159,23 @@ Reusing the same `eventId` for a consumer produces:
 {"level":"INFO","msg":"duplicate event ignored","service":"process-stock","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated"}
 ```
 
+For the deterministic batch example, copy
+`events/consumer-batch-local-env.example.json` to the ignored
+`events/consumer-batch-local-env.json`, set the deployed DynamoDB table name and
+run one consumer:
+
+```bash
+make local-invoke-stock-batch
+make local-invoke-notification-batch
+```
+
+Records `A`, `B`, and `D` should succeed. Record `C` uses
+`customerId=customer-fail`, and the returned payload must be:
+
+```json
+{"batchItemFailures":[{"itemIdentifier":"message-C"}]}
+```
+
 Controlled failures are disabled by default. To exercise them locally:
 
 ```bash
@@ -160,9 +183,10 @@ make local-invoke-stock-failure
 make local-invoke-notification-failure
 ```
 
-These commands are expected to return an error after emitting either `forced
-stock failure` or `forced notification failure`. SAM local does not emulate SQS
-receive counts or move messages to a DLQ.
+These commands emit either `forced stock failure` or `forced notification
+failure`, then return that record in `batchItemFailures`. The Lambda invocation
+itself succeeds because the failure was reported through the partial response.
+SAM local does not emulate SQS receive counts or move messages to a DLQ.
 
 After deploying the stack, `POST /orders` returns status code `202` with a body
 similar to:
@@ -213,6 +237,20 @@ Each consumer should emit its success log once and `duplicate event ignored`
 once. The table should contain one item for `process-stock` and another for
 `send-notification`, both with `eventId=event-123`. Use a fresh `eventId` when
 repeating this experiment against the same stack.
+
+To exercise a cloud batch for the stock branch, deploy with
+`StockFailureCustomerId=customer-fail`, copy `StockQueueUrl` from the outputs,
+and send the four records directly to that queue:
+
+```bash
+aws sqs send-message-batch \
+  --queue-url YOUR_STOCK_QUEUE_URL \
+  --entries file://events/sqs-send-message-batch.json
+```
+
+The source mapping may group up to 10 available messages per invocation. The
+successful records should disappear; only `C` should be retried and eventually
+reach `stock-dlq` if the controlled failure remains enabled.
 
 For a controlled stock failure, set `StockFailureCustomerId` to
 `customer-fail` and leave `NotificationFailureCustomerId` empty. Reverse those
@@ -268,14 +306,18 @@ its visibility timeout while the other branch remains successfully processed.
 ├── cmd/create-order/main.go          # Lambda entry point
 ├── cmd/process-stock/main.go         # stock Lambda entry point
 ├── cmd/send-notification/main.go     # notification Lambda entry point
+├── docs/batch-processing.md          # partial batch response behavior
 ├── docs/failure-handling.md          # retries and DLQ behavior
 ├── docs/idempotency.md               # duplicate-delivery strategy
 ├── events/api-create-order.json      # API Gateway v2 local event
+├── events/consumer-batch-local-env.example.json # batch test configuration
 ├── events/consumer-local-env.example.json # local DynamoDB configuration
 ├── events/local-env.example.json     # local SNS configuration example
 ├── events/order-created.json         # OrderCreated v1 example
+├── events/sqs-order-created-batch.json # local A/B/C/D batch event
 ├── events/sqs-order-created-failure.json # controlled failure event
 ├── events/sqs-order-created.json     # local SQS event
+├── events/sqs-send-message-batch.json # AWS CLI batch entries
 ├── internal/domain/event.go          # versioned integration event
 ├── internal/domain/order.go          # order data and validation
 ├── internal/handler/create_order.go  # HTTP adapter

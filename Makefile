@@ -1,7 +1,8 @@
-.PHONY: test validate build local-invoke local-invoke-stock local-invoke-stock-failure local-invoke-notification local-invoke-notification-failure local-api clean build-CreateOrderFunction build-ProcessStockFunction build-SendNotificationFunction
+.PHONY: test validate build local-invoke local-invoke-stock local-invoke-stock-batch local-invoke-stock-failure local-invoke-notification local-invoke-notification-batch local-invoke-notification-failure local-api clean build-CreateOrderFunction build-ProcessStockFunction build-SendNotificationFunction
 
 LOCAL_ENV_FILE ?= events/local-env.json
 CONSUMER_ENV_FILE ?= events/consumer-local-env.json
+CONSUMER_BATCH_ENV_FILE ?= events/consumer-batch-local-env.json
 
 # Called by SAM's makefile builder. A static binary avoids depending on the
 # developer machine's C library when the function runs on Amazon Linux 2023.
@@ -56,6 +57,11 @@ local-invoke-stock-failure: build
 		--event events/sqs-order-created-failure.json \
 		--env-vars events/forced-failure-env.json
 
+local-invoke-stock-batch: build
+	sam local invoke ProcessStockFunction \
+		--event events/sqs-order-created-batch.json \
+		--env-vars "$(CONSUMER_BATCH_ENV_FILE)"
+
 local-invoke-notification: build
 	sam local invoke SendNotificationFunction \
 		--event events/sqs-order-created.json \
@@ -65,6 +71,11 @@ local-invoke-notification-failure: build
 	sam local invoke SendNotificationFunction \
 		--event events/sqs-order-created-failure.json \
 		--env-vars events/forced-failure-env.json
+
+local-invoke-notification-batch: build
+	sam local invoke SendNotificationFunction \
+		--event events/sqs-order-created-batch.json \
+		--env-vars "$(CONSUMER_BATCH_ENV_FILE)"
 
 local-api: build
 	sam local start-api --env-vars "$(LOCAL_ENV_FILE)"

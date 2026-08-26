@@ -43,6 +43,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	processStockHandler := handler.NewProcessStockHandler(processor)
+	processStockHandler := handler.NewProcessStockHandler(processor, logger)
 	lambda.Start(processStockHandler.Handle)
 }

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless Orders - phase 9 idempotent consumers
+Description: Serverless Orders - phase 10 partial SQS batch responses
 
 Parameters:
   StockFailureCustomerId:
@@ -195,7 +195,9 @@ Resources:
           Type: SQS
           Properties:
             Queue: !GetAtt StockQueue.Arn
-            BatchSize: 1
+            BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
     Metadata:
       BuildMethod: makefile
 
@@ -232,7 +234,9 @@ Resources:
           Type: SQS
           Properties:
             Queue: !GetAtt NotificationQueue.Arn
-            BatchSize: 1
+            BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
     Metadata:
       BuildMethod: makefile
 

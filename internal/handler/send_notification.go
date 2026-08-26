@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/aws/aws-lambda-go/events"
 
@@ -17,22 +18,28 @@ type NotificationSender interface {
 // SendNotificationHandler adapts SQS records to the notification sender.
 type SendNotificationHandler struct {
 	sender NotificationSender
+	logger *slog.Logger
 }
 
 // NewSendNotificationHandler creates an SQS handler for notifications.
-func NewSendNotificationHandler(sender NotificationSender) SendNotificationHandler {
-	return SendNotificationHandler{sender: sender}
+func NewSendNotificationHandler(sender NotificationSender, logger *slog.Logger) SendNotificationHandler {
+	return SendNotificationHandler{sender: sender, logger: logger}
 }
 
-// Handle processes every SQS record and fails the invocation on the first error.
-// Partial batch responses will be introduced in phase 10.
-func (handler SendNotificationHandler) Handle(ctx context.Context, sqsEvent events.SQSEvent) error {
+// Handle processes every record and reports only individual failures to Lambda.
+func (handler SendNotificationHandler) Handle(ctx context.Context, sqsEvent events.SQSEvent) (events.SQSEventResponse, error) {
+	failures := make([]events.SQSBatchItemFailure, 0)
 	for _, record := range sqsEvent.Records {
 		if err := handler.processRecord(ctx, record); err != nil {
-			return fmt.Errorf("process SQS record %q: %w", record.MessageId, err)
+			handler.logger.ErrorContext(ctx, "SQS record failed",
+				"service", "send-notification",
+				"messageId", record.MessageId,
+				"error", err,
+			)
+			failures = append(failures, events.SQSBatchItemFailure{ItemIdentifier: record.MessageId})
 		}
 	}
-	return nil
+	return events.SQSEventResponse{BatchItemFailures: failures}, nil
 }
 
 func (handler SendNotificationHandler) processRecord(ctx context.Context, record events.SQSMessage) error {

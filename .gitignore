@@ -12,6 +12,7 @@ coverage.out
 !.env.example
 events/local-env.json
 events/consumer-local-env.json
+events/consumer-batch-local-env.json
 
 # Editor and operating system files
 .idea/

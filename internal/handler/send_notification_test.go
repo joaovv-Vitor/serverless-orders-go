@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -12,94 +11,108 @@ import (
 )
 
 type fakeNotificationSender struct {
-	events []domain.OrderCreatedEvent
-	err    error
+	events          []domain.OrderCreatedEvent
+	errorsByEventID map[string]error
 }
 
 func (sender *fakeNotificationSender) Send(_ context.Context, event domain.OrderCreatedEvent) error {
 	sender.events = append(sender.events, event)
-	return sender.err
+	return sender.errorsByEventID[event.EventID]
 }
 
 func TestSendNotificationHandlerHandle(t *testing.T) {
 	t.Parallel()
 
 	sender := &fakeNotificationSender{}
-	handler := NewSendNotificationHandler(sender)
+	handler := NewSendNotificationHandler(sender, discardLogger())
 	event := validHandlerOrderCreatedEvent(t)
-	body, err := json.Marshal(event)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
 
-	err = handler.Handle(context.Background(), events.SQSEvent{Records: []events.SQSMessage{
-		{MessageId: "message-123", Body: string(body)},
+	response, err := handler.Handle(context.Background(), events.SQSEvent{Records: []events.SQSMessage{
+		{MessageId: "message-123", Body: marshalHandlerEvent(t, event)},
 	}})
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
-	if len(sender.events) != 1 {
-		t.Fatalf("sent events = %d, want 1", len(sender.events))
+	if len(response.BatchItemFailures) != 0 {
+		t.Fatalf("batch failures = %#v, want none", response.BatchItemFailures)
 	}
-	if sender.events[0].EventID != event.EventID {
-		t.Fatalf("sent eventId = %q, want %q", sender.events[0].EventID, event.EventID)
+	if len(sender.events) != 1 || sender.events[0].EventID != event.EventID {
+		t.Fatalf("sent events = %#v", sender.events)
 	}
 }
 
-func TestSendNotificationHandlerRejectsMalformedMessage(t *testing.T) {
+func TestSendNotificationHandlerReportsMalformedMessage(t *testing.T) {
 	t.Parallel()
 
 	sender := &fakeNotificationSender{}
-	handler := NewSendNotificationHandler(sender)
+	handler := NewSendNotificationHandler(sender, discardLogger())
 
-	err := handler.Handle(context.Background(), events.SQSEvent{Records: []events.SQSMessage{
+	response, err := handler.Handle(context.Background(), events.SQSEvent{Records: []events.SQSMessage{
 		{MessageId: "message-invalid", Body: `{"eventId":`},
 	}})
-	if err == nil {
-		t.Fatal("Handle() error = nil")
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
 	}
+	assertOnlyBatchFailure(t, response, "message-invalid")
 	if len(sender.events) != 0 {
 		t.Fatal("sender was called for malformed JSON")
 	}
 }
 
-func TestSendNotificationHandlerRejectsInvalidEvent(t *testing.T) {
+func TestSendNotificationHandlerReportsInvalidEvent(t *testing.T) {
 	t.Parallel()
 
 	sender := &fakeNotificationSender{}
-	handler := NewSendNotificationHandler(sender)
+	handler := NewSendNotificationHandler(sender, discardLogger())
 	event := validHandlerOrderCreatedEvent(t)
 	event.EventType = "OrderUpdated"
-	body, err := json.Marshal(event)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
 
-	err = handler.Handle(context.Background(), events.SQSEvent{Records: []events.SQSMessage{
-		{MessageId: "message-invalid", Body: string(body)},
+	response, err := handler.Handle(context.Background(), events.SQSEvent{Records: []events.SQSMessage{
+		{MessageId: "message-invalid", Body: marshalHandlerEvent(t, event)},
 	}})
-	if err == nil || err.Error() != `process SQS record "message-invalid": validate OrderCreated event: eventType must be "OrderCreated"` {
+	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
+	assertOnlyBatchFailure(t, response, "message-invalid")
 	if len(sender.events) != 0 {
 		t.Fatal("sender was called for an invalid event")
 	}
 }
 
-func TestSendNotificationHandlerReturnsSenderError(t *testing.T) {
+func TestSendNotificationHandlerReportsSenderError(t *testing.T) {
 	t.Parallel()
 
-	sender := &fakeNotificationSender{err: errors.New("provider unavailable")}
-	handler := NewSendNotificationHandler(sender)
-	body, err := json.Marshal(validHandlerOrderCreatedEvent(t))
+	sender := &fakeNotificationSender{errorsByEventID: map[string]error{"event-123": errors.New("provider unavailable")}}
+	handler := NewSendNotificationHandler(sender, discardLogger())
+
+	response, err := handler.Handle(context.Background(), events.SQSEvent{Records: []events.SQSMessage{
+		{MessageId: "message-123", Body: marshalHandlerEvent(t, validHandlerOrderCreatedEvent(t))},
+	}})
 	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
+		t.Fatalf("Handle() error = %v", err)
+	}
+	assertOnlyBatchFailure(t, response, "message-123")
+}
+
+func TestSendNotificationHandlerReportsOnlyFailedBatchItem(t *testing.T) {
+	t.Parallel()
+
+	sender := &fakeNotificationSender{errorsByEventID: map[string]error{"event-C": errors.New("provider unavailable")}}
+	handler := NewSendNotificationHandler(sender, discardLogger())
+	records := make([]events.SQSMessage, 0, 4)
+	for _, id := range []string{"A", "B", "C", "D"} {
+		event := validHandlerOrderCreatedEvent(t)
+		event.EventID = "event-" + id
+		event.Data.OrderID = "order-" + id
+		records = append(records, events.SQSMessage{MessageId: "message-" + id, Body: marshalHandlerEvent(t, event)})
 	}
 
-	err = handler.Handle(context.Background(), events.SQSEvent{Records: []events.SQSMessage{
-		{MessageId: "message-123", Body: string(body)},
-	}})
-	if err == nil || err.Error() != `process SQS record "message-123": send notification: provider unavailable` {
+	response, err := handler.Handle(context.Background(), events.SQSEvent{Records: records})
+	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
+	}
+	assertOnlyBatchFailure(t, response, "message-C")
+	if len(sender.events) != 4 {
+		t.Fatalf("sent events = %d, want all 4 attempted", len(sender.events))
 	}
 }

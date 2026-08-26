@@ -1,0 +1,18 @@
+[
+  {
+    "Id": "A",
+    "MessageBody": "{\"eventId\":\"event-A\",\"eventType\":\"OrderCreated\",\"eventVersion\":1,\"occurredAt\":\"2026-08-26T15:30:00Z\",\"data\":{\"orderId\":\"order-A\",\"customerId\":\"customer-A\",\"items\":[{\"productId\":\"product-A\",\"quantity\":1}]}}"
+  },
+  {
+    "Id": "B",
+    "MessageBody": "{\"eventId\":\"event-B\",\"eventType\":\"OrderCreated\",\"eventVersion\":1,\"occurredAt\":\"2026-08-26T15:30:00Z\",\"data\":{\"orderId\":\"order-B\",\"customerId\":\"customer-B\",\"items\":[{\"productId\":\"product-B\",\"quantity\":1}]}}"
+  },
+  {
+    "Id": "C",
+    "MessageBody": "{\"eventId\":\"event-C\",\"eventType\":\"OrderCreated\",\"eventVersion\":1,\"occurredAt\":\"2026-08-26T15:30:00Z\",\"data\":{\"orderId\":\"order-C\",\"customerId\":\"customer-fail\",\"items\":[{\"productId\":\"product-C\",\"quantity\":1}]}}"
+  },
+  {
+    "Id": "D",
+    "MessageBody": "{\"eventId\":\"event-D\",\"eventType\":\"OrderCreated\",\"eventVersion\":1,\"occurredAt\":\"2026-08-26T15:30:00Z\",\"data\":{\"orderId\":\"order-D\",\"customerId\":\"customer-D\",\"items\":[{\"productId\":\"product-D\",\"quantity\":1}]}}"
+  }
+]

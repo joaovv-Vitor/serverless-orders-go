@@ -43,6 +43,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	sendNotificationHandler := handler.NewSendNotificationHandler(sender)
+	sendNotificationHandler := handler.NewSendNotificationHandler(sender, logger)
 	lambda.Start(sendNotificationHandler.Handle)
 }

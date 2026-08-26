@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/aws/aws-lambda-go/events"
 
@@ -17,22 +18,28 @@ type StockProcessor interface {
 // ProcessStockHandler adapts SQS records to the stock processor.
 type ProcessStockHandler struct {
 	processor StockProcessor
+	logger    *slog.Logger
 }
 
 // NewProcessStockHandler creates an SQS handler for stock events.
-func NewProcessStockHandler(processor StockProcessor) ProcessStockHandler {
-	return ProcessStockHandler{processor: processor}
+func NewProcessStockHandler(processor StockProcessor, logger *slog.Logger) ProcessStockHandler {
+	return ProcessStockHandler{processor: processor, logger: logger}
 }
 
-// Handle processes every SQS record and fails the invocation on the first error.
-// Partial batch responses will be introduced in phase 10.
-func (handler ProcessStockHandler) Handle(ctx context.Context, sqsEvent events.SQSEvent) error {
+// Handle processes every record and reports only individual failures to Lambda.
+func (handler ProcessStockHandler) Handle(ctx context.Context, sqsEvent events.SQSEvent) (events.SQSEventResponse, error) {
+	failures := make([]events.SQSBatchItemFailure, 0)
 	for _, record := range sqsEvent.Records {
 		if err := handler.processRecord(ctx, record); err != nil {
-			return fmt.Errorf("process SQS record %q: %w", record.MessageId, err)
+			handler.logger.ErrorContext(ctx, "SQS record failed",
+				"service", "process-stock",
+				"messageId", record.MessageId,
+				"error", err,
+			)
+			failures = append(failures, events.SQSBatchItemFailure{ItemIdentifier: record.MessageId})
 		}
 	}
-	return nil
+	return events.SQSEventResponse{BatchItemFailures: failures}, nil
 }
 
 func (handler ProcessStockHandler) processRecord(ctx context.Context, record events.SQSMessage) error {

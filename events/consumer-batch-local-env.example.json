@@ -1,0 +1,10 @@
+{
+  "ProcessStockFunction": {
+    "FORCE_FAILURE_CUSTOMER_ID": "customer-fail",
+    "IDEMPOTENCY_TABLE_NAME": "REPLACE_WITH_DEPLOYED_TABLE_NAME"
+  },
+  "SendNotificationFunction": {
+    "FORCE_FAILURE_CUSTOMER_ID": "customer-fail",
+    "IDEMPOTENCY_TABLE_NAME": "REPLACE_WITH_DEPLOYED_TABLE_NAME"
+  }
+}
