@@ -1,4 +1,4 @@
-.PHONY: test validate build local-invoke local-invoke-stock local-api clean build-CreateOrderFunction build-ProcessStockFunction
+.PHONY: test validate build local-invoke local-invoke-stock local-invoke-notification local-api clean build-CreateOrderFunction build-ProcessStockFunction build-SendNotificationFunction
 
 LOCAL_ENV_FILE ?= events/local-env.json
 
@@ -22,6 +22,15 @@ build-ProcessStockFunction:
 		-o "$(ARTIFACTS_DIR)/bootstrap" \
 		./cmd/process-stock
 
+build-SendNotificationFunction:
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+		-buildvcs=false \
+		-tags lambda.norpc \
+		-trimpath \
+		-ldflags="-s -w" \
+		-o "$(ARTIFACTS_DIR)/bootstrap" \
+		./cmd/send-notification
+
 test:
 	go test ./...
 
@@ -38,6 +47,9 @@ local-invoke: build
 
 local-invoke-stock: build
 	sam local invoke ProcessStockFunction --event events/sqs-order-created.json
+
+local-invoke-notification: build
+	sam local invoke SendNotificationFunction --event events/sqs-order-created.json
 
 local-api: build
 	sam local start-api --env-vars "$(LOCAL_ENV_FILE)"

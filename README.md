@@ -2,15 +2,17 @@
 
 An event-driven serverless application built with Go and AWS to explore asynchronous processing, messaging, resilience and observability.
 
-## Current scope: phase 6 — Stock processing
+## Current scope: phase 7 — SNS fan-out MVP
 
 `POST /orders` validates the request, creates the versioned `OrderCreated`
-event, and publishes it to the standard SNS topic `order-events`. The topic now
-delivers every event to `stock-queue`, which invokes the Go Lambda
-`ProcessStock`. Stock processing is still simulated through structured logs.
+event, and publishes it once to the standard SNS topic `order-events`. SNS sends
+independent copies to the stock and notification queues, and each queue invokes
+its own Go Lambda. Both operations are simulated through structured logs.
 
 ```text
-Client -> HTTP API -> CreateOrder -> SNS -> stock-queue -> ProcessStock
+                                  +-> stock-queue -> ProcessStock
+Client -> HTTP API -> CreateOrder -> SNS
+                                  +-> notification-queue -> SendNotification
 ```
 
 The SNS subscription uses raw message delivery. Therefore, the SQS message body
@@ -21,6 +23,11 @@ keeps the first consumer focused on the event contract.
 item and a completion log. Any error is returned to Lambda so that SQS does not
 delete the message. The event source uses `BatchSize: 1`; batch and partial batch
 response behavior is intentionally reserved for phase 10.
+
+`SendNotification` independently decodes and validates the same event, then logs
+the notification that would be sent to the customer. A failure in one queue does
+not block processing in the other queue. Both event sources currently use
+`BatchSize: 1`.
 
 Request:
 
@@ -85,6 +92,7 @@ make validate      # validate and lint the SAM template
 make build         # compile the Lambda through AWS SAM
 make local-invoke  # build and invoke the Lambda in a local container
 make local-invoke-stock # invoke ProcessStock with a local SQS event
+make local-invoke-notification # invoke SendNotification locally
 make local-api     # serve the HTTP API locally
 make clean         # remove SAM build artifacts
 ```
@@ -104,6 +112,7 @@ The stock consumer can be exercised fully offline:
 
 ```bash
 make local-invoke-stock
+make local-invoke-notification
 ```
 
 Expected output includes JSON log entries similar to:
@@ -111,6 +120,7 @@ Expected output includes JSON log entries similar to:
 ```json
 {"level":"INFO","msg":"processing stock","service":"process-stock","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated","productId":"product-456","quantity":2}
 {"level":"INFO","msg":"stock processed","service":"process-stock","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated"}
+{"level":"INFO","msg":"notification sent","service":"send-notification","eventId":"event-123","orderId":"order-123","eventType":"OrderCreated","customerId":"customer-123"}
 ```
 
 After deploying the stack, `POST /orders` returns status code `202` with a body
@@ -155,17 +165,18 @@ curl --request POST https://YOUR_API_ID.execute-api.REGION.amazonaws.com/orders 
 ```
 
 A `202 Accepted` response means the SNS `Publish` call completed successfully.
-Open the CloudWatch logs for the `ProcessStockFunction` output and look for the
-same `orderId` returned by the API. The expected sequence is:
+Open the CloudWatch logs for `ProcessStockFunction` and
+`SendNotificationFunction`. The same `eventId` and `orderId` must appear in both
+log groups. The expected result is:
 
 ```text
-processing stock
-stock processed
+ProcessStock:      processing stock -> stock processed
+SendNotification: notification sent
 ```
 
-After successful processing, Lambda deletes the message from `stock-queue`. If
-decoding, validation, or processing fails, the invocation fails and the message
-becomes visible again after the queue visibility timeout.
+After successful processing, each Lambda deletes only the message from its own
+queue. If one branch fails, that branch's message becomes visible again after
+its visibility timeout while the other branch remains successfully processed.
 
 ## Structure
 
@@ -173,6 +184,7 @@ becomes visible again after the queue visibility timeout.
 .
 ├── cmd/create-order/main.go          # Lambda entry point
 ├── cmd/process-stock/main.go         # stock Lambda entry point
+├── cmd/send-notification/main.go     # notification Lambda entry point
 ├── events/api-create-order.json      # API Gateway v2 local event
 ├── events/local-env.example.json     # local SNS configuration example
 ├── events/order-created.json         # OrderCreated v1 example
@@ -181,7 +193,9 @@ becomes visible again after the queue visibility timeout.
 ├── internal/domain/order.go          # order data and validation
 ├── internal/handler/create_order.go  # HTTP adapter
 ├── internal/handler/process_stock.go # SQS adapter
+├── internal/handler/send_notification.go # notification SQS adapter
 ├── internal/messaging/sns_publisher.go # AWS SNS adapter
+├── internal/notification/sender.go   # simulated notification logic
 ├── internal/stock/processor.go       # simulated stock logic
 ├── Makefile
 ├── go.mod
@@ -189,7 +203,7 @@ becomes visible again after the queue visibility timeout.
 ```
 
 `sam build` and the tests do not create AWS resources. An explicit `sam deploy`
-creates the Lambda, HTTP API, SNS topic, SQS queue, SNS subscription, queue
-resource policy, both Lambda functions, the SQS event source mapping, and their
-generated execution roles. `ProcessStock` can only receive and delete messages
-and read attributes from `stock-queue`; it has no SNS or persistence access.
+creates the HTTP API, SNS topic, SQS queues, SNS subscriptions, queue
+resource policies, three Lambda functions, two SQS event source mappings, and
+their generated execution roles. Each consumer can poll only its own queue and
+has no SNS or persistence access.

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless Orders - phase 6 stock processing
+Description: Serverless Orders - phase 7 SNS fan-out
 
 Globals:
   Function:
@@ -45,6 +45,40 @@ Resources:
       TopicArn: !Ref OrderEventsTopic
       Protocol: sqs
       Endpoint: !GetAtt StockQueue.Arn
+      RawMessageDelivery: true
+
+  NotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: notification-queue
+      FifoQueue: false
+
+  NotificationQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref NotificationQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowOrderEventsTopic
+            Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt NotificationQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref OrderEventsTopic
+
+  NotificationQueueSubscription:
+    Type: AWS::SNS::Subscription
+    DependsOn: NotificationQueuePolicy
+    Properties:
+      TopicArn: !Ref OrderEventsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt NotificationQueue.Arn
       RawMessageDelivery: true
 
   OrdersHttpApi:
@@ -109,6 +143,33 @@ Resources:
     Metadata:
       BuildMethod: makefile
 
+  SendNotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - x86_64
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: PollNotificationQueue
+              Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+              Resource: !GetAtt NotificationQueue.Arn
+      Events:
+        NotificationQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt NotificationQueue.Arn
+            BatchSize: 1
+    Metadata:
+      BuildMethod: makefile
+
 Outputs:
   OrderEventsTopicArn:
     Description: ARN of the order events SNS topic
@@ -122,6 +183,14 @@ Outputs:
     Description: ARN of the stock SQS queue
     Value: !GetAtt StockQueue.Arn
 
+  NotificationQueueUrl:
+    Description: URL of the notification SQS queue
+    Value: !Ref NotificationQueue
+
+  NotificationQueueArn:
+    Description: ARN of the notification SQS queue
+    Value: !GetAtt NotificationQueue.Arn
+
   OrdersApiUrl:
     Description: Base URL of the orders HTTP API
     Value: !Sub https://${OrdersHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
@@ -133,3 +202,7 @@ Outputs:
   ProcessStockFunctionName:
     Description: Name of the ProcessStock Lambda function
     Value: !Ref ProcessStockFunction
+
+  SendNotificationFunctionName:
+    Description: Name of the SendNotification Lambda function
+    Value: !Ref SendNotificationFunction

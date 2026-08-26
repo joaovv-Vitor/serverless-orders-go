@@ -27,7 +27,7 @@ func TestProcessStockHandlerHandle(t *testing.T) {
 
 	processor := &fakeStockProcessor{}
 	handler := NewProcessStockHandler(processor)
-	event := validStockEvent(t)
+	event := validHandlerOrderCreatedEvent(t)
 	body, err := json.Marshal(event)
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
@@ -69,7 +69,7 @@ func TestProcessStockHandlerRejectsInvalidEvent(t *testing.T) {
 
 	processor := &fakeStockProcessor{}
 	handler := NewProcessStockHandler(processor)
-	event := validStockEvent(t)
+	event := validHandlerOrderCreatedEvent(t)
 	event.EventVersion = 2
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -92,7 +92,7 @@ func TestProcessStockHandlerReturnsProcessorError(t *testing.T) {
 
 	processor := &fakeStockProcessor{err: errors.New("processing failed")}
 	handler := NewProcessStockHandler(processor)
-	body, err := json.Marshal(validStockEvent(t))
+	body, err := json.Marshal(validHandlerOrderCreatedEvent(t))
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
@@ -105,7 +105,7 @@ func TestProcessStockHandlerReturnsProcessorError(t *testing.T) {
 	}
 }
 
-func validStockEvent(t *testing.T) domain.OrderCreatedEvent {
+func validHandlerOrderCreatedEvent(t *testing.T) domain.OrderCreatedEvent {
 	t.Helper()
 
 	event, err := domain.NewOrderCreatedEvent(
