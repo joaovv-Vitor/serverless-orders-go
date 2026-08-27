@@ -7,22 +7,15 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/sns"
 
 	"github.com/joaovv-Vitor/serverless-orders-go/internal/handler"
-	"github.com/joaovv-Vitor/serverless-orders-go/internal/messaging"
 	"github.com/joaovv-Vitor/serverless-orders-go/internal/observability"
 	"github.com/joaovv-Vitor/serverless-orders-go/internal/orders"
 )
 
 func main() {
 	logger := observability.NewJSONLogger(os.Stdout)
-	startupLogger := logger.With("service", "create-order")
-	topicARN := os.Getenv("ORDER_EVENTS_TOPIC_ARN")
-	if topicARN == "" {
-		startupLogger.Error("missing required environment variable", "name", "ORDER_EVENTS_TOPIC_ARN")
-		os.Exit(1)
-	}
+	startupLogger := logger.With("service", "get-order")
 	tableName := os.Getenv("ORDERS_TABLE_NAME")
 	if tableName == "" {
 		startupLogger.Error("missing required environment variable", "name", "ORDERS_TABLE_NAME")
@@ -34,17 +27,12 @@ func main() {
 		startupLogger.Error("failed to load AWS configuration", "error", err)
 		os.Exit(1)
 	}
-	publisher, err := messaging.NewSNSPublisher(sns.NewFromConfig(sdkConfig), topicARN)
-	if err != nil {
-		startupLogger.Error("failed to configure SNS publisher", "error", err)
-		os.Exit(1)
-	}
-	orderRepository, err := orders.NewDynamoDBRepository(dynamodb.NewFromConfig(sdkConfig), tableName)
+	repository, err := orders.NewDynamoDBRepository(dynamodb.NewFromConfig(sdkConfig), tableName)
 	if err != nil {
 		startupLogger.Error("failed to configure orders repository", "error", err)
 		os.Exit(1)
 	}
 
-	createOrderHandler := handler.NewCreateOrderHandler(publisher, orderRepository, logger)
-	lambda.Start(createOrderHandler.Handle)
+	getOrderHandler := handler.NewGetOrderHandler(repository, logger)
+	lambda.Start(getOrderHandler.Handle)
 }

@@ -1,0 +1,24 @@
+{
+  "version": "2.0",
+  "routeKey": "GET /orders/{id}",
+  "rawPath": "/orders/order-123",
+  "rawQueryString": "",
+  "headers": {},
+  "requestContext": {
+    "http": {
+      "method": "GET",
+      "path": "/orders/order-123",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "sam-local"
+    },
+    "routeKey": "GET /orders/{id}",
+    "stage": "$default",
+    "time": "26/Aug/2026:15:30:00 +0000",
+    "timeEpoch": 1787758200000
+  },
+  "pathParameters": {
+    "id": "order-123"
+  },
+  "isBase64Encoded": false
+}

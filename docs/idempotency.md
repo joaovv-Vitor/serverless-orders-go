@@ -49,8 +49,9 @@ it is not mistaken for a duplicate.
 
 If an operation returns a known error after acquiring the reservation, the
 guard deletes the item before returning the error. This lets the next SQS
-delivery try again. The controlled failures from phase 8 happen before the
-reservation, so they remain suitable for demonstrating retries and DLQs.
+delivery try again. The controlled stock failure updates the order to `FAILED`,
+returns an error, and releases its idempotency reservation, so it remains
+suitable for demonstrating retries and DLQs.
 
 This educational implementation has one explicit limitation: an abrupt runtime
 termination immediately after the conditional write can leave a reservation

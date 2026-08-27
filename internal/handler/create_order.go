@@ -50,9 +50,16 @@ type EventPublisher interface {
 	Publish(context.Context, domain.OrderCreatedEvent) error
 }
 
+// OrderWriter is the order persistence capability required by CreateOrder.
+type OrderWriter interface {
+	Create(context.Context, domain.Order) error
+	UpdateStatus(context.Context, string, domain.OrderStatus, time.Time) error
+}
+
 // CreateOrderHandler handles API Gateway requests for POST /orders.
 type CreateOrderHandler struct {
 	publisher  EventPublisher
+	orders     OrderWriter
 	newOrderID func() (string, error)
 	newEventID func() (string, error)
 	now        func() time.Time
@@ -60,9 +67,10 @@ type CreateOrderHandler struct {
 }
 
 // NewCreateOrderHandler creates a handler with production ID and clock dependencies.
-func NewCreateOrderHandler(publisher EventPublisher, logger *slog.Logger) CreateOrderHandler {
+func NewCreateOrderHandler(publisher EventPublisher, orders OrderWriter, logger *slog.Logger) CreateOrderHandler {
 	return CreateOrderHandler{
 		publisher:  publisher,
+		orders:     orders,
 		newOrderID: generateID,
 		newEventID: generateID,
 		now:        time.Now,
@@ -106,7 +114,8 @@ func (handler CreateOrderHandler) Handle(
 		)
 		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("generate event id: %w", err)
 	}
-	event, err := domain.NewOrderCreatedEvent(eventID, handler.now(), orderID, input)
+	now := handler.now()
+	event, err := domain.NewOrderCreatedEvent(eventID, now, orderID, input)
 	if err != nil {
 		handler.logger.ErrorContext(ctx, "order event creation failed",
 			"service", createOrderService,
@@ -117,6 +126,20 @@ func (handler CreateOrderHandler) Handle(
 		)
 		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("create OrderCreated event: %w", err)
 	}
+	order, err := domain.NewOrder(orderID, input, now)
+	if err != nil {
+		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("create order: %w", err)
+	}
+	if err := handler.orders.Create(ctx, order); err != nil {
+		handler.logger.ErrorContext(ctx, "order persistence failed",
+			"service", createOrderService,
+			"eventId", event.EventID,
+			"orderId", event.Data.OrderID,
+			"eventType", event.EventType,
+			"error", err,
+		)
+		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("persist accepted order: %w", err)
+	}
 	if err := handler.publisher.Publish(ctx, event); err != nil {
 		handler.logger.ErrorContext(ctx, "order event publication failed",
 			"service", createOrderService,
@@ -125,7 +148,14 @@ func (handler CreateOrderHandler) Handle(
 			"eventType", event.EventType,
 			"error", err,
 		)
-		return events.APIGatewayV2HTTPResponse{}, fmt.Errorf("publish OrderCreated event: %w", err)
+		publishErr := fmt.Errorf("publish OrderCreated event: %w", err)
+		if updateErr := handler.orders.UpdateStatus(ctx, orderID, domain.OrderStatusFailed, handler.now()); updateErr != nil {
+			return events.APIGatewayV2HTTPResponse{}, errors.Join(
+				publishErr,
+				fmt.Errorf("mark order failed: %w", updateErr),
+			)
+		}
+		return events.APIGatewayV2HTTPResponse{}, publishErr
 	}
 	handler.logger.InfoContext(ctx, "order accepted",
 		"service", createOrderService,

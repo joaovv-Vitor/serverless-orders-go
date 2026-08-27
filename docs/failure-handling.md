@@ -41,6 +41,11 @@ SAM local invokes a function once. It does not poll SQS, update a receive count,
 wait for a visibility timeout, or move a message to a DLQ. Those behaviors must
 be verified against a deployed stack.
 
+Since phase 12, stock processing also persists order status. Local stock
+invocation therefore requires credentials plus the deployed orders and
+idempotency table names described by
+`events/consumer-failure-local-env.example.json`.
+
 ## Cloud verification
 
 Configure one failure parameter at a time, deploy, and send an order with

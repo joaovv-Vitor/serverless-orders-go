@@ -22,6 +22,28 @@ func (function eventPublisherFunc) Publish(ctx context.Context, event domain.Ord
 	return function(ctx, event)
 }
 
+type fakeOrderWriter struct {
+	created   []domain.Order
+	createErr error
+	updates   []domain.OrderStatus
+	updateErr error
+}
+
+func (writer *fakeOrderWriter) Create(_ context.Context, order domain.Order) error {
+	writer.created = append(writer.created, order)
+	return writer.createErr
+}
+
+func (writer *fakeOrderWriter) UpdateStatus(
+	_ context.Context,
+	_ string,
+	status domain.OrderStatus,
+	_ time.Time,
+) error {
+	writer.updates = append(writer.updates, status)
+	return writer.updateErr
+}
+
 func TestCreateOrderHandlerHandle(t *testing.T) {
 	t.Parallel()
 
@@ -98,11 +120,13 @@ func TestCreateOrderHandlerHandle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var publishedEvent domain.OrderCreatedEvent
+			orderWriter := &fakeOrderWriter{}
 			handler := CreateOrderHandler{
 				publisher: eventPublisherFunc(func(_ context.Context, event domain.OrderCreatedEvent) error {
 					publishedEvent = event
 					return nil
 				}),
+				orders:     orderWriter,
 				newOrderID: func() (string, error) { return "order-test-id", nil },
 				newEventID: func() (string, error) { return "event-test-id", nil },
 				now: func() time.Time {
@@ -139,6 +163,9 @@ func TestCreateOrderHandlerHandle(t *testing.T) {
 			if published != tt.wantPublished {
 				t.Fatalf("event published = %v, want %v", published, tt.wantPublished)
 			}
+			if persisted := len(orderWriter.created) == 1; persisted != tt.wantPublished {
+				t.Fatalf("order persisted = %v, want %v", persisted, tt.wantPublished)
+			}
 			if tt.wantPublished {
 				if publishedEvent.EventID != "event-test-id" {
 					t.Fatalf("published eventId = %q", publishedEvent.EventID)
@@ -148,6 +175,9 @@ func TestCreateOrderHandlerHandle(t *testing.T) {
 				}
 				if publishedEvent.EventType != domain.OrderCreatedEventType {
 					t.Fatalf("published eventType = %q", publishedEvent.EventType)
+				}
+				if orderWriter.created[0].Status != domain.OrderStatusAccepted {
+					t.Fatalf("persisted status = %q", orderWriter.created[0].Status)
 				}
 			}
 		})
@@ -159,6 +189,7 @@ func TestCreateOrderHandlerHandleReturnsIDGenerationError(t *testing.T) {
 
 	handler := CreateOrderHandler{
 		publisher:  eventPublisherFunc(func(context.Context, domain.OrderCreatedEvent) error { return nil }),
+		orders:     &fakeOrderWriter{},
 		newOrderID: func() (string, error) { return "", errors.New("random source unavailable") },
 		newEventID: func() (string, error) { return "event-test-id", nil },
 		now:        time.Now,
@@ -180,6 +211,7 @@ func TestCreateOrderHandlerHandleReturnsEventIDGenerationError(t *testing.T) {
 
 	handler := CreateOrderHandler{
 		publisher:  eventPublisherFunc(func(context.Context, domain.OrderCreatedEvent) error { return nil }),
+		orders:     &fakeOrderWriter{},
 		newOrderID: func() (string, error) { return "order-test-id", nil },
 		newEventID: func() (string, error) { return "", errors.New("random source unavailable") },
 		now:        time.Now,
@@ -196,10 +228,12 @@ func TestCreateOrderHandlerHandleReturnsEventIDGenerationError(t *testing.T) {
 func TestCreateOrderHandlerHandleReturnsPublishError(t *testing.T) {
 	t.Parallel()
 
+	orderWriter := &fakeOrderWriter{}
 	handler := CreateOrderHandler{
 		publisher: eventPublisherFunc(func(context.Context, domain.OrderCreatedEvent) error {
 			return errors.New("SNS unavailable")
 		}),
+		orders:     orderWriter,
 		newOrderID: func() (string, error) { return "order-test-id", nil },
 		newEventID: func() (string, error) { return "event-test-id", nil },
 		now:        time.Now,
@@ -210,6 +244,34 @@ func TestCreateOrderHandlerHandleReturnsPublishError(t *testing.T) {
 	if err == nil || err.Error() != "publish OrderCreated event: SNS unavailable" {
 		t.Fatalf("Handle() error = %v", err)
 	}
+	if len(orderWriter.updates) != 1 || orderWriter.updates[0] != domain.OrderStatusFailed {
+		t.Fatalf("status updates = %v, want FAILED", orderWriter.updates)
+	}
+}
+
+func TestCreateOrderHandlerDoesNotPublishWhenPersistenceFails(t *testing.T) {
+	t.Parallel()
+
+	published := false
+	handler := CreateOrderHandler{
+		publisher: eventPublisherFunc(func(context.Context, domain.OrderCreatedEvent) error {
+			published = true
+			return nil
+		}),
+		orders:     &fakeOrderWriter{createErr: errors.New("DynamoDB unavailable")},
+		newOrderID: func() (string, error) { return "order-test-id", nil },
+		newEventID: func() (string, error) { return "event-test-id", nil },
+		now:        time.Now,
+		logger:     discardLogger(),
+	}
+
+	_, err := handler.Handle(context.Background(), validCreateOrderAPIRequest())
+	if err == nil || err.Error() != "persist accepted order: DynamoDB unavailable" {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if published {
+		t.Fatal("event was published after persistence failure")
+	}
 }
 
 func TestCreateOrderHandlerLogsCorrelationFields(t *testing.T) {
@@ -218,6 +280,7 @@ func TestCreateOrderHandlerLogsCorrelationFields(t *testing.T) {
 	var output bytes.Buffer
 	handler := CreateOrderHandler{
 		publisher:  eventPublisherFunc(func(context.Context, domain.OrderCreatedEvent) error { return nil }),
+		orders:     &fakeOrderWriter{},
 		newOrderID: func() (string, error) { return "order-test-id", nil },
 		newEventID: func() (string, error) { return "event-test-id", nil },
 		now:        time.Now,

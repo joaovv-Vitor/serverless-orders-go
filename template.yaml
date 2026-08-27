@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless Orders - phase 11 observability
+Description: Serverless Orders - phase 12 order persistence
 
 Parameters:
   StockFailureCustomerId:
@@ -19,6 +19,17 @@ Globals:
     Timeout: 5
 
 Resources:
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+
   ProcessedEventsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -143,6 +154,7 @@ Resources:
       Environment:
         Variables:
           ORDER_EVENTS_TOPIC_ARN: !Ref OrderEventsTopic
+          ORDERS_TABLE_NAME: !Ref OrdersTable
       Policies:
         - Version: "2012-10-17"
           Statement:
@@ -151,6 +163,12 @@ Resources:
               Action:
                 - sns:Publish
               Resource: !Ref OrderEventsTopic
+            - Sid: CreateAndFailOrders
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt OrdersTable.Arn
       Events:
         CreateOrder:
           Type: HttpApi
@@ -174,6 +192,7 @@ Resources:
         Variables:
           FORCE_FAILURE_CUSTOMER_ID: !Ref StockFailureCustomerId
           IDEMPOTENCY_TABLE_NAME: !Ref ProcessedEventsTable
+          ORDERS_TABLE_NAME: !Ref OrdersTable
       Policies:
         - Version: "2012-10-17"
           Statement:
@@ -190,6 +209,11 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:DeleteItem
               Resource: !GetAtt ProcessedEventsTable.Arn
+            - Sid: UpdateOrderStatus
+              Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource: !GetAtt OrdersTable.Arn
       Events:
         StockQueueEvent:
           Type: SQS
@@ -240,6 +264,36 @@ Resources:
     Metadata:
       BuildMethod: makefile
 
+  GetOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          ORDERS_TABLE_NAME: !Ref OrdersTable
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: ReadOrders
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource: !GetAtt OrdersTable.Arn
+      Events:
+        GetOrder:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref OrdersHttpApi
+            Path: /orders/{id}
+            Method: GET
+            PayloadFormatVersion: "2.0"
+    Metadata:
+      BuildMethod: makefile
+
   CreateOrderLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -256,6 +310,12 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /aws/lambda/${SendNotificationFunction}
+      RetentionInDays: 14
+
+  GetOrderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${GetOrderFunction}
       RetentionInDays: 14
 
   ObservabilityDashboard:
@@ -279,6 +339,7 @@ Resources:
                 "stat": "Sum",
                 "metrics": [
                   ["AWS/Lambda", "Invocations", "FunctionName", "${CreateOrderFunction}"],
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${GetOrderFunction}"],
                   ["AWS/Lambda", "Invocations", "FunctionName", "${ProcessStockFunction}"],
                   ["AWS/Lambda", "Invocations", "FunctionName", "${SendNotificationFunction}"]
                 ]
@@ -298,6 +359,7 @@ Resources:
                 "stat": "Sum",
                 "metrics": [
                   ["AWS/Lambda", "Errors", "FunctionName", "${CreateOrderFunction}"],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${GetOrderFunction}"],
                   ["AWS/Lambda", "Errors", "FunctionName", "${ProcessStockFunction}"],
                   ["AWS/Lambda", "Errors", "FunctionName", "${SendNotificationFunction}"]
                 ]
@@ -317,6 +379,7 @@ Resources:
                 "stat": "Average",
                 "metrics": [
                   ["AWS/Lambda", "Duration", "FunctionName", "${CreateOrderFunction}"],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${GetOrderFunction}"],
                   ["AWS/Lambda", "Duration", "FunctionName", "${ProcessStockFunction}"],
                   ["AWS/Lambda", "Duration", "FunctionName", "${SendNotificationFunction}"]
                 ]
@@ -380,6 +443,14 @@ Resources:
         }
 
 Outputs:
+  OrdersTableName:
+    Description: Name of the DynamoDB table that stores orders
+    Value: !Ref OrdersTable
+
+  OrdersTableArn:
+    Description: ARN of the DynamoDB table that stores orders
+    Value: !GetAtt OrdersTable.Arn
+
   ObservabilityDashboardName:
     Description: Name of the CloudWatch observability dashboard
     Value: !Ref ObservabilityDashboard
@@ -435,6 +506,10 @@ Outputs:
   CreateOrderFunctionName:
     Description: Name of the CreateOrder Lambda function
     Value: !Ref CreateOrderFunction
+
+  GetOrderFunctionName:
+    Description: Name of the GetOrder Lambda function
+    Value: !Ref GetOrderFunction
 
   ProcessStockFunctionName:
     Description: Name of the ProcessStock Lambda function

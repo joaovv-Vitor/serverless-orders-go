@@ -58,9 +58,9 @@ idempotency. SQS Standard remains an at-least-once system and can still deliver
 a successful message again. The DynamoDB reservation therefore remains active
 for every consumer record.
 
-The controlled `customer-fail` path runs before the reservation. Consequently,
-the intentionally failed `C` remains retryable, while successful records retain
-their idempotency entries.
+The controlled `customer-fail` path returns an error from inside the guarded
+operation. The guard releases `C`'s reservation, so it remains retryable, while
+successful records retain their idempotency entries.
 
 ## Observability note
 

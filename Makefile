@@ -1,8 +1,9 @@
-.PHONY: test validate build local-invoke local-invoke-stock local-invoke-stock-batch local-invoke-stock-failure local-invoke-notification local-invoke-notification-batch local-invoke-notification-failure local-api clean build-CreateOrderFunction build-ProcessStockFunction build-SendNotificationFunction
+.PHONY: test validate build local-invoke local-invoke-get local-invoke-stock local-invoke-stock-batch local-invoke-stock-failure local-invoke-notification local-invoke-notification-batch local-invoke-notification-failure local-api clean build-CreateOrderFunction build-GetOrderFunction build-ProcessStockFunction build-SendNotificationFunction
 
 LOCAL_ENV_FILE ?= events/local-env.json
 CONSUMER_ENV_FILE ?= events/consumer-local-env.json
 CONSUMER_BATCH_ENV_FILE ?= events/consumer-batch-local-env.json
+CONSUMER_FAILURE_ENV_FILE ?= events/consumer-failure-local-env.json
 
 # Called by SAM's makefile builder. A static binary avoids depending on the
 # developer machine's C library when the function runs on Amazon Linux 2023.
@@ -23,6 +24,15 @@ build-ProcessStockFunction:
 		-ldflags="-s -w" \
 		-o "$(ARTIFACTS_DIR)/bootstrap" \
 		./cmd/process-stock
+
+build-GetOrderFunction:
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+		-buildvcs=false \
+		-tags lambda.norpc \
+		-trimpath \
+		-ldflags="-s -w" \
+		-o "$(ARTIFACTS_DIR)/bootstrap" \
+		./cmd/get-order
 
 build-SendNotificationFunction:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
@@ -47,6 +57,11 @@ local-invoke: build
 		--event events/api-create-order.json \
 		--env-vars "$(LOCAL_ENV_FILE)"
 
+local-invoke-get: build
+	sam local invoke GetOrderFunction \
+		--event events/api-get-order.json \
+		--env-vars "$(LOCAL_ENV_FILE)"
+
 local-invoke-stock: build
 	sam local invoke ProcessStockFunction \
 		--event events/sqs-order-created.json \
@@ -55,7 +70,7 @@ local-invoke-stock: build
 local-invoke-stock-failure: build
 	sam local invoke ProcessStockFunction \
 		--event events/sqs-order-created-failure.json \
-		--env-vars events/forced-failure-env.json
+		--env-vars "$(CONSUMER_FAILURE_ENV_FILE)"
 
 local-invoke-stock-batch: build
 	sam local invoke ProcessStockFunction \
@@ -70,7 +85,7 @@ local-invoke-notification: build
 local-invoke-notification-failure: build
 	sam local invoke SendNotificationFunction \
 		--event events/sqs-order-created-failure.json \
-		--env-vars events/forced-failure-env.json
+		--env-vars "$(CONSUMER_FAILURE_ENV_FILE)"
 
 local-invoke-notification-batch: build
 	sam local invoke SendNotificationFunction \

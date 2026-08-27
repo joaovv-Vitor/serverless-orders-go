@@ -1,5 +1,9 @@
 {
   "CreateOrderFunction": {
-    "ORDER_EVENTS_TOPIC_ARN": "arn:aws:sns:REGION:ACCOUNT_ID:order-events"
+    "ORDER_EVENTS_TOPIC_ARN": "arn:aws:sns:REGION:ACCOUNT_ID:order-events",
+    "ORDERS_TABLE_NAME": "REPLACE_WITH_DEPLOYED_ORDERS_TABLE_NAME"
+  },
+  "GetOrderFunction": {
+    "ORDERS_TABLE_NAME": "REPLACE_WITH_DEPLOYED_ORDERS_TABLE_NAME"
   }
 }

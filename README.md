@@ -2,7 +2,7 @@
 
 An event-driven serverless application built with Go and AWS to explore asynchronous processing, messaging, resilience and observability.
 
-## Current scope: phase 11 — Observability
+## Current scope: phase 12 — Order persistence
 
 `POST /orders` validates the request, creates the versioned `OrderCreated`
 event, and publishes it once to the standard SNS topic `order-events`. SNS sends
@@ -57,6 +57,12 @@ Lambda log groups and a CloudWatch dashboard for Lambda execution, source queue,
 in-flight message, and DLQ metrics. Queries and metric interpretation are in
 `docs/observability.md`.
 
+`CreateOrder` now stores the order as `ACCEPTED` before publishing
+`OrderCreated`. `ProcessStock` advances it through `PROCESSING` to `PROCESSED`
+or `FAILED`. A separate `GetOrder` Lambda exposes `GET /orders/{id}` using a
+strongly consistent DynamoDB read. Persistence decisions and the DynamoDB/SNS
+dual-write limitation are documented in `docs/persistence.md`.
+
 Request:
 
 ```json
@@ -77,6 +83,23 @@ Response:
 {
   "orderId": "generated-uuid",
   "status": "accepted"
+}
+```
+
+The returned ID can subsequently be queried:
+
+```http
+GET /orders/{id}
+```
+
+```json
+{
+  "orderId": "generated-uuid",
+  "customerId": "customer-123",
+  "items": [{"productId":"product-456","quantity":2}],
+  "status": "PROCESSED",
+  "createdAt": "2026-08-26T15:30:00Z",
+  "updatedAt": "2026-08-26T15:30:02Z"
 }
 ```
 
@@ -119,6 +142,7 @@ make test          # run Go tests
 make validate      # validate and lint the SAM template
 make build         # compile the Lambda through AWS SAM
 make local-invoke  # build and invoke the Lambda in a local container
+make local-invoke-get # invoke GET /orders/{id} locally
 make local-invoke-stock # invoke ProcessStock with a local SQS event
 make local-invoke-stock-batch # invoke ProcessStock with A/B/C/D
 make local-invoke-stock-failure # force a local stock failure
@@ -141,10 +165,10 @@ Unit tests use fake SNS and DynamoDB clients. They verify conditional writes,
 duplicate detection, reservation release, and the exact published event without
 requiring credentials or creating cloud resources.
 
-Normal local consumer invocation now uses the deployed DynamoDB table. Copy
+Normal local consumer invocation now uses the deployed DynamoDB tables. Copy
 `events/consumer-local-env.example.json` to the ignored
-`events/consumer-local-env.json`, provide `ProcessedEventsTableName` from the
-stack outputs, and use AWS credentials before running:
+`events/consumer-local-env.json`, provide `ProcessedEventsTableName` and
+`OrdersTableName` from the stack outputs, and use AWS credentials before running:
 
 ```bash
 make local-invoke-stock
@@ -167,7 +191,7 @@ Reusing the same `eventId` for a consumer produces:
 
 For the deterministic batch example, copy
 `events/consumer-batch-local-env.example.json` to the ignored
-`events/consumer-batch-local-env.json`, set the deployed DynamoDB table name and
+`events/consumer-batch-local-env.json`, set the deployed DynamoDB table names and
 run one consumer:
 
 ```bash
@@ -183,6 +207,9 @@ Records `A`, `B`, and `D` should succeed. Record `C` uses
 ```
 
 Controlled failures are disabled by default. To exercise them locally:
+
+Copy `events/consumer-failure-local-env.example.json` to the ignored
+`events/consumer-failure-local-env.json`, configure both table names, then run:
 
 ```bash
 make local-invoke-stock-failure
@@ -218,6 +245,13 @@ Then run either command:
 ```bash
 make local-invoke
 make local-api
+```
+
+The same environment file also configures `GetOrderFunction`, so a deployed
+order can be queried locally with:
+
+```bash
+make local-invoke-get
 ```
 
 For an end-to-end AWS check, deploy explicitly:
@@ -301,6 +335,15 @@ ProcessStock:      processing stock -> stock processed
 SendNotification: notification sent
 ```
 
+Query the returned ID until the asynchronous stock consumer finishes:
+
+```bash
+curl https://YOUR_API_ID.execute-api.REGION.amazonaws.com/orders/YOUR_ORDER_ID
+```
+
+The usual transition is `ACCEPTED → PROCESSING → PROCESSED`. A controlled stock
+failure produces `FAILED` and remains eligible for SQS retry.
+
 Open the dashboard named by the `ObservabilityDashboardName` stack output to
 compare these executions with queue and DLQ metrics. Use the Logs Insights
 queries in `docs/observability.md` to follow the returned `orderId` end to end.
@@ -314,14 +357,18 @@ its visibility timeout while the other branch remains successfully processed.
 ```text
 .
 ├── cmd/create-order/main.go          # Lambda entry point
+├── cmd/get-order/main.go             # order query Lambda entry point
 ├── cmd/process-stock/main.go         # stock Lambda entry point
 ├── cmd/send-notification/main.go     # notification Lambda entry point
 ├── docs/batch-processing.md          # partial batch response behavior
 ├── docs/failure-handling.md          # retries and DLQ behavior
 ├── docs/idempotency.md               # duplicate-delivery strategy
 ├── docs/observability.md              # dashboard, metrics and log queries
+├── docs/persistence.md                # order table and lifecycle decisions
 ├── events/api-create-order.json      # API Gateway v2 local event
+├── events/api-get-order.json         # local GET request
 ├── events/consumer-batch-local-env.example.json # batch test configuration
+├── events/consumer-failure-local-env.example.json # failure test configuration
 ├── events/consumer-local-env.example.json # local DynamoDB configuration
 ├── events/local-env.example.json     # local SNS configuration example
 ├── events/order-created.json         # OrderCreated v1 example
@@ -331,7 +378,9 @@ its visibility timeout while the other branch remains successfully processed.
 ├── events/sqs-send-message-batch.json # AWS CLI batch entries
 ├── internal/domain/event.go          # versioned integration event
 ├── internal/domain/order.go          # order data and validation
+├── internal/domain/persisted_order.go # persisted lifecycle model
 ├── internal/handler/create_order.go  # HTTP adapter
+├── internal/handler/get_order.go     # GET /orders/{id} adapter
 ├── internal/handler/process_stock.go # SQS adapter
 ├── internal/handler/send_notification.go # notification SQS adapter
 ├── internal/idempotency/guard.go      # claim/execute/release workflow
@@ -339,6 +388,7 @@ its visibility timeout while the other branch remains successfully processed.
 ├── internal/messaging/sns_publisher.go # AWS SNS adapter
 ├── internal/notification/sender.go   # simulated notification logic
 ├── internal/observability/logger.go  # shared structured JSON logger
+├── internal/orders/repository.go     # DynamoDB order persistence adapter
 ├── internal/stock/processor.go       # simulated stock logic
 ├── Makefile
 ├── go.mod
@@ -347,8 +397,7 @@ its visibility timeout while the other branch remains successfully processed.
 
 `sam build` and the tests do not create AWS resources. An explicit `sam deploy`
 creates the HTTP API, SNS topic, SQS queues, SNS subscriptions, queue
-resource policies, three Lambda functions, two SQS event source mappings, one
-on-demand DynamoDB table, three CloudWatch log groups, one CloudWatch dashboard,
-and their generated execution roles. Each consumer can poll only its own queue
-and can write/delete only idempotency items in that table; neither consumer can
-publish to SNS.
+resource policies, four Lambda functions, two SQS event source mappings, two
+on-demand DynamoDB tables, four CloudWatch log groups, one CloudWatch dashboard,
+and their generated execution roles. IAM access to the orders table is divided
+between creation, status update, and read-only query responsibilities.

@@ -17,6 +17,21 @@ type memoryExecutor struct {
 	seen map[string]bool
 }
 
+type fakeOrderStatusUpdater struct {
+	statuses []domain.OrderStatus
+	errors   map[domain.OrderStatus]error
+}
+
+func (updater *fakeOrderStatusUpdater) UpdateStatus(
+	_ context.Context,
+	_ string,
+	status domain.OrderStatus,
+	_ time.Time,
+) error {
+	updater.statuses = append(updater.statuses, status)
+	return updater.errors[status]
+}
+
 func newMemoryExecutor() *memoryExecutor {
 	return &memoryExecutor{seen: make(map[string]bool)}
 }
@@ -37,7 +52,8 @@ func TestProcessorProcessWritesStructuredLogs(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	processor, err := NewProcessor(observability.NewJSONLogger(&output), "", newMemoryExecutor())
+	statusUpdater := &fakeOrderStatusUpdater{}
+	processor, err := NewProcessor(observability.NewJSONLogger(&output), "", newMemoryExecutor(), statusUpdater)
 	if err != nil {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
@@ -77,17 +93,24 @@ func TestProcessorProcessWritesStructuredLogs(t *testing.T) {
 	if entries[2]["message"] != "stock processed" {
 		t.Fatalf("completion log = %#v", entries[2])
 	}
+	if len(statusUpdater.statuses) != 2 || statusUpdater.statuses[0] != domain.OrderStatusProcessing || statusUpdater.statuses[1] != domain.OrderStatusProcessed {
+		t.Fatalf("status updates = %v", statusUpdater.statuses)
+	}
 }
 
 func TestNewProcessorRequiresLogger(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewProcessor(nil, "", newMemoryExecutor())
+	_, err := NewProcessor(nil, "", newMemoryExecutor(), &fakeOrderStatusUpdater{})
 	if err == nil || err.Error() != "logger is required" {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
-	_, err = NewProcessor(slog.Default(), "", nil)
+	_, err = NewProcessor(slog.Default(), "", nil, &fakeOrderStatusUpdater{})
 	if err == nil || err.Error() != "idempotency executor is required" {
+		t.Fatalf("NewProcessor() error = %v", err)
+	}
+	_, err = NewProcessor(slog.Default(), "", newMemoryExecutor(), nil)
+	if err == nil || err.Error() != "orders repository is required" {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
 }
@@ -96,7 +119,8 @@ func TestProcessorProcessCanForceFailure(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	processor, err := NewProcessor(observability.NewJSONLogger(&output), "customer-123", newMemoryExecutor())
+	statusUpdater := &fakeOrderStatusUpdater{}
+	processor, err := NewProcessor(observability.NewJSONLogger(&output), "customer-123", newMemoryExecutor(), statusUpdater)
 	if err != nil {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}
@@ -113,13 +137,16 @@ func TestProcessorProcessCanForceFailure(t *testing.T) {
 	if entry["level"] != "ERROR" || entry["message"] != "forced stock failure" {
 		t.Fatalf("failure log = %#v", entry)
 	}
+	if len(statusUpdater.statuses) != 2 || statusUpdater.statuses[0] != domain.OrderStatusProcessing || statusUpdater.statuses[1] != domain.OrderStatusFailed {
+		t.Fatalf("status updates = %v", statusUpdater.statuses)
+	}
 }
 
 func TestProcessorProcessIgnoresDuplicateEventID(t *testing.T) {
 	t.Parallel()
 
 	var output bytes.Buffer
-	processor, err := NewProcessor(observability.NewJSONLogger(&output), "", newMemoryExecutor())
+	processor, err := NewProcessor(observability.NewJSONLogger(&output), "", newMemoryExecutor(), &fakeOrderStatusUpdater{})
 	if err != nil {
 		t.Fatalf("NewProcessor() error = %v", err)
 	}

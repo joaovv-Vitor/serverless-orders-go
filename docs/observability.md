@@ -48,7 +48,7 @@ the SQS `messageId` to the event and order identifiers.
 
 ## Log retention
 
-SAM declares the three Lambda log groups with 14-day retention. This avoids
+SAM declares the four Lambda log groups with 14-day retention. This avoids
 indefinite retention while keeping enough history for educational experiments.
 
 ## Dashboard
@@ -70,7 +70,7 @@ record logs, and DLQ depth must therefore be considered together.
 
 ## CloudWatch Logs Insights queries
 
-Select all three Lambda log groups before running these queries.
+Select the four Lambda log groups before running these queries.
 
 Follow one order:
 
@@ -114,12 +114,15 @@ Deploy the stack, submit an order, and copy `orderId` from the HTTP `202`
 response. Open the dashboard named by `ObservabilityDashboardName`. Then select
 the three Lambda log groups in Logs Insights and run the order query above.
 
-The expected timeline is:
+The expected processing timeline is:
 
 ```text
 create-order       order accepted
 process-stock      SQS record completed
 send-notification  SQS record completed
 ```
+
+A later `GET /orders/{id}` adds `get-order: order retrieved` for the same
+`orderId`.
 
 Ordering between the two consumers is intentionally not guaranteed.
